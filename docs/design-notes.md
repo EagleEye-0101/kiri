@@ -78,10 +78,23 @@ No file watches, webhooks, or inbox polling. Polling-via-cron-workflow handles e
 State lives in three tiers, by what kind of state it is:
 
 - **In git** — workflow definitions (`.ts` files), template scripts, per-template `.claude/settings.json`, Seatbelt profiles. Everything that benefits from review and version history.
-- **In SQLite** — runtime state: runs, todos, schedules, app state (paused/running, in-flight counter), MCP audit log, run metadata + envelopes. Single file in the data dir, queryable, indexed, transactional. **better-sqlite3** as the driver (synchronous, fast, fits the single-process model), **Drizzle** for schema and migrations.
+- **In SQLite** — runtime state: runs, todos, schedules, app state (paused/running, in-flight counter), MCP audit log, run metadata + envelopes. Single file in the data dir, queryable, indexed, transactional. **bun:sqlite** as the driver (synchronous, fast, statically linked into the Bun runtime), **Drizzle** for schema and migrations.
 - **On disk (data dir)** — large blob payloads referenced by path from SQLite rows: full CC transcripts, big stdout dumps, anything that'd bloat the DB. Same pattern CI systems use to keep the DB lean.
 
 Pragmatic v1 simplification: skip the disk-blob split initially. Put traces straight into SQLite TEXT columns. Move to disk-backed blobs only when a "last 50 runs" feed query starts dragging on trace payloads — probably won't for months.
+
+### Workflow registry & run snapshots
+
+Workflow definitions are TS files in `workflows/` — the single source of truth, with no SQL representation. There is **no `workflows` table**. On startup (and on file change in dev) the loader scans the directory and hydrates an in-memory registry; runs reference workflows by name only.
+
+When a run starts, the executor captures a **snapshot** of everything that produced it:
+
+- The resolved workflow definition (name, schemas, node list, gating, schedule) onto the `runs` row.
+- Per-node *materials* — the actual bytes read off disk for each node — onto the `run_nodes` rows. For script nodes that's the script source. Later, for agent nodes (M1+), it's the prompt template, `.claude/settings.json`, and the sandbox profile.
+
+This means feed entries always show the exact code that ran, not whatever the file says now; diffing two runs of the same workflow shows what changed between them; and renaming or deleting a workflow leaves old runs intact under their original name (UI shows a "(deleted)" badge).
+
+Re-running an old run uses the *current* definition, not the snapshot. Replay-from-snapshot is out of scope for v1.
 
 ## Todo system
 
@@ -176,12 +189,30 @@ The orchestrator is a single Node process serving both the engine and the UI. Th
 
 ### Stack
 
-- **Hono** — HTTP server, SSE streams, MCP transport. The Hono process *is* the orchestrator daemon: runs the cron tick loop, executes workflows, hosts the MCP server, serves the UI bundle. One process, clear ownership.
+- **Bun** — runtime. TypeScript runs natively (no separate compile step), `bun:sqlite` is statically linked (no native-module headache), and `bun build --compile` produces a single-file macOS binary — the release artifact for distribution. One toolchain for install, test, run, and build.
+- **Hono** — HTTP server, SSE streams, MCP transport. Runtime-agnostic by design but pairs cleanly with Bun via `Bun.serve`. The Hono process *is* the orchestrator daemon: runs the cron tick loop, executes workflows, hosts the MCP server, serves the UI bundle. One process, clear ownership.
 - **Vite + React** — UI bundle, served by Hono. No SSR, no framework magic — just a SPA window into the daemon. TanStack Router or React Router for routing.
 - **SSE** for live feed updates. One-way (server → client), browsers handle reconnection natively, Hono has `streamSSE` built in. WebSockets reserved for if/when bidirectional streaming is actually needed.
-- **better-sqlite3 + Drizzle** for state (see *State storage* under Architecture).
+- **bun:sqlite + Drizzle** for state (see *State storage* under Architecture). Drizzle's `drizzle-orm/bun-sqlite` adapter; schema and migrations identical to a Node + better-sqlite3 setup.
 
 No Next.js, no HonoX, no full-stack framework — explicit choice to keep UI and daemon as separate layers communicating over HTTP/SSE.
+
+### Launch model & data dir
+
+Kiri is a CLI launched from the cwd of any git repo that contains a `workflows/` directory. The tool is global; the repo is the workspace. Same shape as `vite`, `next dev`, `drizzle-kit` — switching projects is `cd && kiri`. There is no global cross-repo store.
+
+Repo-scoped runtime state lives in `.kiri/` at the repo root, gitignored:
+
+```
+<repo-root>/
+  workflows/        # TS workflow definitions (in git)
+  templates/        # per-template dirs, M1+ (in git)
+  .kiri/            # gitignored — repo-scoped runtime state
+    state.db        # SQLite
+    runs/<id>/      # per-run scratch dirs
+```
+
+Startup asserts cwd is a git repo with a `workflows/` directory; refuses to launch otherwise.
 
 ### Process model
 
@@ -274,7 +305,6 @@ Suggested ordering — cheapest viable spine first, layer up. Each phase a usabl
 
 ## Open questions
 
-- **Workflow definitions in main repo or separate repo?** Probably main repo with a conventional directory; revisit if multiple personal repos start sharing workflows.
 - **Trace retention policy.** How long do verbose traces and CC transcripts stay in SQLite before pruning? Size-cap, time-cap, or both? Decision triggers the disk-blob split.
 - **Templates vs inline scripts.** Defer until 3+ CC-flavoured workflows exist. Template extraction is a refactor, not a v1 decision.
 - **Summariser model choice.** Haiku via API for speed/cost, or a CC session for consistency with the rest of the agent stack? Probably Haiku.

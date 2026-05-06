@@ -9,7 +9,10 @@ These are constraints, not work items. They hold for every milestone below.
 - Standard node envelope (`status`, `output`, `error`, `traces`, `usage`) — established in M0, never deferred
 - Zod input/output schemas on every node — established in M0
 - No shell interpolation of inputs anywhere — argv arrays and env vars only
-- Workflow definitions live in `workflows/` in the main repo
+- Kiri is a CLI launched per-repo; workflow definitions live in `<cwd>/workflows/` of whichever repo Kiri is running against. No global cross-repo store
+- Repo-scoped runtime state lives in `<cwd>/.kiri/` (gitignored)
+- Workflow definitions are loaded into an in-memory registry; there is no `workflows` table — TS files are the only source of truth
+- Every run snapshots the resolved workflow definition and per-node materials (script source, prompt + settings later) at start; feed entries always reflect the exact code that ran
 - Per-run scratch directory; scripts never run with cwd of repo or home
 - Per-template env scope; no leaking of orchestrator state into scripts
 - Output rendered as plain text in the UI for now (no markdown until a real need shows up)
@@ -18,12 +21,15 @@ These are constraints, not work items. They hold for every milestone below.
 
 - Hono process serving HTTP and the SPA bundle
 - Vite + React single-page UI, no router yet
-- SQLite + Drizzle schema: workflows registry, runs, run_nodes (per-node envelope persisted)
-- Workflow definition loader: TS files in `workflows/`, `defineWorkflow({...})` shape
-- Script node executor: `child_process` spawn, stdout/stderr/exit captured, envelope assembled
-- Per-run scratch directory created and cleaned up
-- Manual trigger: list workflows in UI, "Run" button per workflow
-- Feed view: reverse-chronological list of runs, click-to-expand for full envelope and traces
+- Repo-scoped startup: assert cwd is a git repo containing `workflows/`; create `.kiri/` if missing; refuse to launch otherwise
+- SQLite + Drizzle schema (in `.kiri/state.db`): `runs` (with definition snapshot), `run_nodes` (per-node envelope + materials snapshot). No `workflows` table
+- Workflow definition loader: TS files in `<cwd>/workflows/` hydrate an in-memory registry; `defineWorkflow({...})` shape
+- Script node executor: `child_process` spawn (argv + scoped env, never shell strings), stdout/stderr/exit captured, envelope assembled
+- Per-run scratch directory under `.kiri/runs/<run-id>/`, created and cleaned up
+- Run-start snapshot: capture the resolved workflow definition onto the `runs` row and each node's script source onto its `run_nodes` row before execution
+- Manual trigger: list workflows in UI (from registry), "Run" button per workflow
+- Feed view: reverse-chronological list of runs, click-to-expand for full envelope, traces, and per-node material snapshot
+- Orphaned-workflow handling: runs whose workflow no longer exists in the registry render under their original name with a "(deleted)" badge
 - Reload to refresh; no live updates
 - Workflow definition hot-reload in dev (file watcher → registry rebuild)
 
