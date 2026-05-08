@@ -1,5 +1,8 @@
 import migration0000 from "../../../drizzle/0000_initial.sql" with { type: "text" };
 import migration0001 from "../../../drizzle/0001_index_run_nodes_run_id.sql" with { type: "text" };
+import migration0002 from "../../../drizzle/0002_rename_run_nodes_to_run_steps.sql" with {
+  type: "text",
+};
 import type { KiriDb } from "./index.ts";
 
 interface Migration {
@@ -13,10 +16,16 @@ interface Migration {
  * SQL file under `drizzle/`, then add a corresponding text import above
  * and an entry here. Names are matched exactly against `__kiri_migrations`
  * — don't rename existing entries after they've shipped.
+ *
+ * `0002_rename_run_nodes_to_run_steps` and its meta snapshot were
+ * hand-written: drizzle-kit's rename-detection prompt is interactive-only
+ * and the next auto-generated migration may need its `prevId` adjusted
+ * to chain off `drizzle/meta/0002_snapshot.json`.
  */
 const MIGRATIONS: Migration[] = [
   { name: "0000_initial", sql: migration0000 },
   { name: "0001_index_run_nodes_run_id", sql: migration0001 },
+  { name: "0002_rename_run_nodes_to_run_steps", sql: migration0002 },
 ];
 
 /**
