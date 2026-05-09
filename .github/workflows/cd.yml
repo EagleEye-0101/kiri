@@ -33,6 +33,8 @@ jobs:
               - 'shell/**'
               - 'wrangler.toml'
       - if: steps.filter.outputs.shell == 'true'
+        uses: jdx/mise-action@v2
+      - if: steps.filter.outputs.shell == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
