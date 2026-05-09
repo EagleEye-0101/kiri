@@ -134,6 +134,42 @@ Work items:
 - Dark mode — defer until needed.
 - Storybook or visual regression testing — `bun:test` + RTL + Playwright covers component and golden-path concerns. Revisit if visual regressions become a real problem.
 
+## M3.9 — Live updates, toasts, and cancel
+
+Replaces reload-to-refresh with live updates over SSE. Activity feed, run detail page, workflows side nav, and workflow detail page all react to a single in-process event bus the server pushes over `GET /api/events`. Run completions toast bottom-right when off the run page. Cancel button kills the in-flight child process from the run detail page.
+
+Realtime / SSE feed updates were originally scoped to M7; pulled forward because the reload-to-refresh model is the dominant rough edge in the UX, and cancel + toasts are obvious adjacent capability once live updates exist.
+
+Work items:
+
+- In-process event bus emitting a small typed surface: `run.started`, `run.updated`, `run.step.updated`, `run.finished`, `workflow.added`, `workflow.updated`, `workflow.removed`.
+- Executor publishes run/step events at lifecycle transitions; watcher publishes workflow events on registry changes.
+- `GET /api/events` Hono `streamSSE` endpoint subscribes to the bus and forwards events. Existing CORS allowlist applies; the endpoint is read-only and exempt from the `X-Kiri-Client` header requirement (`EventSource` can't send custom headers; no CSRF write surface is exposed).
+- Workflow watcher promoted from dev-only to always-on. The `NODE_ENV !== "production"` gate in `bin/kiri.ts` is removed — per-repo tooling has no meaningful "production" mode, and live YAML edits should reflect without restart.
+- Client opens a single `EventSource('/api/events')` at boot; events trigger data-layer cache invalidation and views refetch via existing GETs. On (re)connect the client refetches all live views to recover from any missed events. No event log / `Last-Event-ID` resumption.
+- Event payloads stay thin (IDs + status). The single relaxation is `run.finished`, which carries `workflowName` so the toast can render without a refetch round-trip.
+- Toast notifications for completed runs:
+  - Bottom-right stack; auto-dismiss after 6s; click navigates to the run detail page; X dismisses.
+  - Suppressed if the user is already on `/runs/:id` for the finishing run.
+  - Status-coloured strip matching the existing design tokens — no new visual language.
+- Cancel:
+  - `POST /api/runs/:id/cancel` (subject to `X-Kiri-Client`). 202 on cancel sent; 409 if already terminal.
+  - Executor tracks the spawned child process per active run; cancel sends SIGTERM, waits ~2s, then SIGKILL.
+  - New `cancelled` terminal status alongside `ok` / `failed`. Distinct status colour token. Drizzle migration extends the run + step status enums.
+  - Concurrency slot released on cancel like any terminal transition.
+  - Cancel button on run detail page, visible only when status is `running`. One-click, no confirmation modal.
+
+**Done when:** triggering a run shows status transitions live in the feed without reload; the run detail page shows step transitions live; running a workflow off-page produces a bottom-right toast on completion; clicking cancel on an in-flight run halts the child and transitions the run to `cancelled` with all surfaces updating live.
+
+**Out of scope:**
+
+- Live stdout/stderr streaming during step execution. Logs still land all-at-once on step completion; line-by-line streaming is a separate follow-on.
+- Event log / `Last-Event-ID` resumption. Best-effort delivery; clients refetch on (re)connect.
+- Toast notifications for workflow file changes or run starts. Side nav + feed updating live is the right level of feedback for those.
+- Feed filtering and scoping (M7).
+- Summariser step (M7).
+- Global pause control (M7).
+
 ## M4 — Cron
 
 - In-process tick loop, runs while Hono is up
