@@ -20,7 +20,7 @@ test("refreshing on /runs/:id boots the SPA and shows the not-found view", async
   await expect(page.getByRole("heading", { name: /run not found/i })).toBeVisible();
   await expect(page.getByText("missing-run-id")).toBeVisible();
 
-  await page.getByRole("link", { name: /back to dashboard/i }).click();
+  await page.getByRole("link", { name: /all activity/i }).click();
   await expect(page).toHaveURL("/");
   await expect(page.getByText(/no runs yet/i)).toBeVisible();
 });
@@ -56,4 +56,36 @@ test("clicking the wordmark from the run-not-found view returns to the dashboard
   await expect(page.getByRole("heading", { name: /run not found/i })).toBeVisible();
   await page.getByRole("link", { name: "kiri", exact: true }).click();
   await expect(page).toHaveURL("/");
+});
+
+test("opening a run detail page reveals stdout when the step is expanded", async ({
+  page,
+  request,
+}) => {
+  const { runId } = await triggerRun(request, "golden");
+
+  await page.goto(`/runs/${runId}`);
+  await expect(page.getByRole("heading", { level: 2, name: /golden/i })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 3, name: /steps/i })).toBeVisible();
+
+  const step = page.getByRole("button", { name: /sh:/i });
+  await expect(step).toHaveAttribute("aria-expanded", "false");
+  await step.click();
+  await expect(step).toHaveAttribute("aria-expanded", "true");
+  // The fixture's `echo` produces this exact stdout; exact: true disambiguates
+  // from the kind label and the materials snapshot, both of which contain the
+  // same phrase wrapped in `sh: echo "..."`.
+  await expect(page.getByText("kiri e2e fixture", { exact: true })).toBeVisible();
+});
+
+test("a failed run surfaces a run-level failure block on the detail page", async ({
+  page,
+  request,
+}) => {
+  const { runId } = await triggerRun(request, "failing");
+
+  await page.goto(`/runs/${runId}`);
+  const alert = page.getByRole("alert");
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText(/run failed/i);
 });
