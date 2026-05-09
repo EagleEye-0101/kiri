@@ -115,19 +115,193 @@ export const EXAMPLE_WORKFLOW_YAML = `# yaml-language-server: $schema=../.kiri/w
 
 name: example
 steps:
-  - use: example
+  - sh: echo "Lee"
+  - use: claude-code
+    env:
+      PROMPT_FILE: prompts/example.tpl
 `;
 
-/** Contents of the scaffolded example bundle's `run.sh`. */
-export const EXAMPLE_RUN_SCRIPT = `#!/bin/sh
-echo "hello from kiri"
+/** Contents of the scaffolded `prompts/example.tpl`. */
+export const EXAMPLE_PROMPT_TPL = `Say a friendly one-sentence hello to {{KIRI_INPUT}}.
+`;
+
+/** Contents of the scaffolded `scripts/claude-code/run.sh`. */
+export const CLAUDE_CODE_RUN_SCRIPT = `#!/bin/sh
+# Spawns the Claude Code CLI with the prompt read from PROMPT_FILE
+# (resolved against KIRI_REPO_ROOT) and rendered with {{VAR}}
+# placeholders substituted from the environment. Tool permissions
+# are deferred to the user's own ~/.claude/settings.json — keeps
+# this bundle out of the credential-resolution path so claude's
+# normal login flow keeps working.
+set -eu
+
+: "\${PROMPT_FILE:?required env var}"
+: "\${KIRI_REPO_ROOT:?required (kiri injects this)}"
+
+# Default exported so {{MAX_TURNS}} can be referenced inside prompt
+# templates even when the workflow leaves it unset.
+export MAX_TURNS="\${MAX_TURNS:-8}"
+
+for dep in claude awk; do
+  command -v "$dep" >/dev/null 2>&1 || {
+    echo "claude-code bundle requires '$dep' on PATH" >&2
+    exit 1
+  }
+done
+
+# Verify the prompt file exists *before* the awk render — POSIX
+# \`set -e\` doesn't propagate failures from \`$()\` inside an
+# assignment, so a missing file would otherwise silently leave
+# \$prompt empty and we'd exec \`claude -p ""\`.
+[ -f "$KIRI_REPO_ROOT/$PROMPT_FILE" ] || {
+  echo "claude-code: prompt file not found: $PROMPT_FILE" >&2
+  exit 1
+}
+
+# Slurp the previous step's stdout (piped here by kiri) into KIRI_INPUT
+# so prompts can reference {{KIRI_INPUT}}. $() trims one trailing
+# newline so single-line outputs (e.g. \`echo "Lee"\`) render inline;
+# multi-line outputs keep their internal newlines.
+export KIRI_INPUT="$(cat)"
+
+# Render {{VAR}} placeholders from the environment in a single
+# left-to-right pass. Substituted values are not re-scanned, so a
+# value containing "{{X}}" stays literal — no infinite loops on
+# self-referential content. Unknown vars resolve to empty. LC_ALL=C
+# pins the regex character classes to ASCII so non-C locales can't
+# widen \`[A-Z]\` to accented uppercase.
+prompt=$(LC_ALL=C awk '
+  {
+    out = ""
+    rest = $0
+    while (match(rest, /\\{\\{[A-Z_][A-Z0-9_]*\\}\\}/)) {
+      name = substr(rest, RSTART + 2, RLENGTH - 4)
+      out = out substr(rest, 1, RSTART - 1) ENVIRON[name]
+      rest = substr(rest, RSTART + RLENGTH)
+    }
+    print out rest
+  }
+' "$KIRI_REPO_ROOT/$PROMPT_FILE")
+
+if [ -n "\${MODEL:-}" ]; then
+  exec claude -p "$prompt" --max-turns "$MAX_TURNS" --model "$MODEL"
+else
+  exec claude -p "$prompt" --max-turns "$MAX_TURNS"
+fi
+`;
+
+/** Contents of the scaffolded `scripts/claude-code/README.md`. */
+export const CLAUDE_CODE_README = `# claude-code bundle
+
+A workflow step that spawns the Claude Code CLI with a prompt rendered
+from a template under \`prompts/\`.
+
+Minimal usage — only \`PROMPT_FILE\` is required:
+
+\`\`\`yaml
+- use: claude-code
+  env:
+    PROMPT_FILE: prompts/my-prompt.tpl
+\`\`\`
+
+Full reference, all knobs explicit:
+
+\`\`\`yaml
+- use: claude-code
+  env:
+    PROMPT_FILE: prompts/my-prompt.tpl   # required
+    MAX_TURNS: "8"                       # optional, default "8"
+    MODEL: opus                          # optional, no default — claude picks
+\`\`\`
+
+## Env-var contract
+
+| Var | Required | Default | Description |
+| --- | --- | --- | --- |
+| \`PROMPT_FILE\` | yes | — | Path to the prompt template. If relative, resolved against \`KIRI_REPO_ROOT\`; absolute paths are passed through as-is. |
+| \`MAX_TURNS\` | no | \`8\` | Hard cap on the number of agent turns. |
+| \`MODEL\` | no | — | Override the model. If unset, \`claude\` picks its default. |
+
+\`KIRI_REPO_ROOT\` is supplied by kiri.
+
+## Tool permissions
+
+This bundle does not configure tool permissions — the agent runs with
+whatever your \`~/.claude/settings.json\` allows. Constrain a workflow
+by writing the prompt around the tools you want it to use, or set up
+your global claude settings to match the strictness you want.
+
+## What \`run.sh\` does
+
+1. Reads the previous step's stdout (piped here by kiri) into
+   \`KIRI_INPUT\` and renders \`$KIRI_REPO_ROOT/$PROMPT_FILE\` —
+   substituting \`{{VAR}}\` placeholders from the environment (see
+   *Prompt templates* below).
+2. Spawns \`claude -p "$prompt" --max-turns "$MAX_TURNS"\` (plus
+   \`--model "$MODEL"\` if set). The agent's final message lands on
+   stdout and shows up in the run feed.
+
+## Prompt templates
+
+Prompt files support \`{{VAR}}\` placeholders, substituted from the
+environment in a single left-to-right pass. Names must be uppercase
+letters, digits, or underscores (matching the env-var convention).
+Unknown vars resolve to empty. Substituted values are not re-scanned,
+so a value that itself contains \`{{X}}\` stays literal — no infinite
+loops on self-referential content.
+
+### Substitutable vars
+
+| Var | Source |
+| --- | --- |
+| \`{{KIRI_INPUT}}\` | Previous step's stdout (one trailing newline trimmed). |
+| \`{{KIRI_RUN_ID}}\` | Kiri-injected run identifier. |
+| \`{{KIRI_STEP_INDEX}}\` | Zero-based index of this step in the run. |
+| \`{{KIRI_REPO_ROOT}}\` | Absolute path of the workflow repo root. |
+| \`{{KIRI_BUNDLE_DIR}}\` | Absolute path of this bundle's directory. |
+| \`{{KIRI_META_FILE}}\` | Path the bundle writes step metadata to. |
+| \`{{PROMPT_FILE}}\`, \`{{MAX_TURNS}}\` | Bundle env-var contract values, defaulted as documented above. |
+| \`{{MODEL}}\` | Same — but resolves to empty when unset, since \`MODEL\` has no default. |
+| Any \`{{MY_VAR}}\` | Anything set in the workflow's \`env:\` block. |
+
+### Example
+
+\`\`\`yaml
+- sh: echo "Lee"
+- use: claude-code
+  env:
+    PROMPT_FILE: prompts/greet.tpl
+    TONE: cheerful
+\`\`\`
+
+\`\`\`
+# prompts/greet.tpl
+Say a {{TONE}} one-sentence hello to {{KIRI_INPUT}}.
+\`\`\`
+
+Renders to: \`Say a cheerful one-sentence hello to Lee.\`
+
+## Dependencies
+
+The \`claude\` CLI must be on \`PATH\` (\`awk\` and POSIX \`sh\` are
+assumed). The bundle fails with a clear error at the top of the run if
+either is missing.
+
+## Cost capture (deferred)
+
+A later iteration will switch the spawn to \`--output-format json\`,
+parse the transcript for \`cost_usd\`, \`tokens_in\`, \`tokens_out\`,
+and \`model\`, and write them to \`$KIRI_META_FILE\` so the feed entry
+shows cost in its header.
 `;
 
 /** Relative paths reported by `initRepo`. */
 const SCHEMA_REL_PATH = ".kiri/workflow.schema.json";
 const README_REL_PATH = "README.md";
 const EXAMPLE_REL_PATH = "workflows/example.yaml";
-const EXAMPLE_BUNDLE_RUN_REL_PATH = "scripts/example/run.sh";
+const EXAMPLE_PROMPT_REL_PATH = "prompts/example.tpl";
+const CLAUDE_CODE_RUN_REL_PATH = "scripts/claude-code/run.sh";
+const CLAUDE_CODE_README_REL_PATH = "scripts/claude-code/README.md";
 const GITIGNORE_REL_PATH = ".gitignore";
 const GITIGNORE_KIRI_LINE = ".kiri/";
 
@@ -193,16 +367,19 @@ const ensureKiriIgnored = (cwd: string): boolean => {
 
 /**
  * Bootstrap a kiri-ready repo at `cwd`: scaffold `workflows/` with a README
- * and example workflow, drop in the example script bundle, (re)write the
- * JSON Schema file, and add `.kiri/` to `.gitignore` if one exists.
- * User-authored README/YAML/script files are never overwritten — only
- * missing files are created. The schema file is always refreshed.
+ * and a 2-step example workflow, drop in the example prompt template and
+ * `claude-code` bundle, (re)write the JSON Schema file, and add `.kiri/`
+ * to `.gitignore` if one exists. User-authored files are never
+ * overwritten — only missing files are created. The schema file is
+ * always refreshed.
  */
 export function initRepo(cwd: string): InitResult {
   const workflowsDir = join(cwd, "workflows");
-  const exampleBundleDir = join(cwd, "scripts", "example");
+  const promptsDir = join(cwd, "prompts");
+  const claudeCodeBundleDir = join(cwd, "scripts", "claude-code");
   mkdirSync(workflowsDir, { recursive: true });
-  mkdirSync(exampleBundleDir, { recursive: true });
+  mkdirSync(promptsDir, { recursive: true });
+  mkdirSync(claudeCodeBundleDir, { recursive: true });
 
   const created: string[] = [];
   const skipped: string[] = [];
@@ -216,12 +393,26 @@ export function initRepo(cwd: string): InitResult {
     skipped,
   );
   writeIfMissing(
-    join(exampleBundleDir, "run.sh"),
-    EXAMPLE_BUNDLE_RUN_REL_PATH,
-    EXAMPLE_RUN_SCRIPT,
+    join(promptsDir, "example.tpl"),
+    EXAMPLE_PROMPT_REL_PATH,
+    EXAMPLE_PROMPT_TPL,
+    created,
+    skipped,
+  );
+  writeIfMissing(
+    join(claudeCodeBundleDir, "run.sh"),
+    CLAUDE_CODE_RUN_REL_PATH,
+    CLAUDE_CODE_RUN_SCRIPT,
     created,
     skipped,
     0o755,
+  );
+  writeIfMissing(
+    join(claudeCodeBundleDir, "README.md"),
+    CLAUDE_CODE_README_REL_PATH,
+    CLAUDE_CODE_README,
+    created,
+    skipped,
   );
 
   writeSchemaFile(cwd);
