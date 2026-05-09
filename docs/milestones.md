@@ -109,6 +109,31 @@ Work items:
 
 **Done when:** visiting a malicious page in another tab cannot trigger a workflow run.
 
+## M3.5 — UX foundation + test infrastructure
+
+A web-app overhaul on top of test infrastructure that's been deferred up to now. The UI is restyled around a gov.uk-inspired design language — minimalist, high-contrast, typography-led, no shadows or gradients. Component tests via `bun:test` + `happy-dom` + `@testing-library/react`; E2E via Playwright. Tailwind v4 becomes the only styling mechanism in the client.
+
+Realtime / SSE feed updates stay deferred to M7. The feed in this milestone reload-to-refreshes.
+
+Work items:
+
+- Component test infra: `bun:test` + `happy-dom` + `@testing-library/react`. Smoke `<App>` test to lock in wiring.
+- E2E test infra: Playwright + a single golden-path test (boot kiri → list workflows → trigger a run → see it in the feed → open the run page).
+- Tailwind v4 with design tokens following the gov.uk system: ink `#0b0c0c`, muted `#505a5f`, rule `#b1b4b6`, accent `#1d70b8`; status colours running `#1d70b8` / ok `#00703c` / failed `#d4351c` / orphaned `#f47738`; focus `#ffdd00`; body 18px / 1.5 line-height; headings 36 / 24 / 19 / 16 at weight 700; system sans + monospace stack. Replaces `src/client/app.css` entirely — no surviving hand-rolled CSS, no CSS modules, Tailwind utilities + `@layer components` only.
+- Client router via `wouter`: `/` (dashboard) and `/runs/:id` (run page). Replaces the inline expanded-run view.
+- Activity feed redesign: gov.uk-style entry rows with status strip, workflow name, status, trigger, started-at, duration. Borders or whitespace only, no cards.
+- Workflow run page at `/runs/:id`: GitHub-Actions-shaped — header (workflow, status, trigger, duration, started-at) with per-step expandable sections covering stdout, stderr, duration, and the materials snapshot.
+- Workflows list redesign: typography-led row with status, schedule slot (placeholder for M4), and trigger button.
+
+**Done when:** the web app has been fully restyled in the gov.uk design language, the run-detail view is its own page, component + E2E tests run in CI, and Tailwind is the only styling mechanism in the client with no surviving hand-rolled CSS.
+
+**Out of scope:**
+
+- SSE / realtime feed updates (M7).
+- Feed filtering and scoping (M7).
+- Dark mode — defer until needed.
+- Storybook or visual regression testing — `bun:test` + RTL + Playwright covers component and golden-path concerns. Revisit if visual regressions become a real problem.
+
 ## M4 — Cron
 
 - In-process tick loop, runs while Hono is up
