@@ -236,4 +236,70 @@ describe("createApp", () => {
       expect(body.run.isOrphan).toBe(true);
     });
   });
+
+  describe("Cache-Control on stable-path SPA assets", () => {
+    it("sends no-store on /app.js, /app.css, /, and /index.html", async () => {
+      const app = createApp({ db, registry, cwd });
+      for (const path of ["/app.js", "/app.css", "/", "/index.html"]) {
+        const res = await app.request(path);
+        expect(res.headers.get("Cache-Control")).toBe("no-store");
+      }
+    });
+
+    it("does not send no-store on hashed /assets/* paths", async () => {
+      const app = createApp({ db, registry, cwd });
+      const res = await app.request("/assets/anything-abc123.js");
+      expect(res.headers.get("Cache-Control")).toBeNull();
+    });
+
+    it("does not send no-store on /api routes", async () => {
+      const app = createApp({ db, registry, cwd });
+      const res = await app.request("/api/health");
+      expect(res.headers.get("Cache-Control")).toBeNull();
+    });
+  });
+
+  describe("CORS allow-list", () => {
+    const ALLOWED = ["https://local.kiri.build", "http://127.0.0.1:4242", "http://localhost:4242"];
+
+    it("echoes the origin on /api responses for every allowed origin", async () => {
+      const app = createApp({ db, registry, cwd });
+      for (const origin of ALLOWED) {
+        const res = await app.request("/api/health", { headers: { Origin: origin } });
+        expect(res.headers.get("Access-Control-Allow-Origin")).toBe(origin);
+      }
+    });
+
+    it("echoes the origin on stable-path static assets", async () => {
+      const app = createApp({ db, registry, cwd });
+      const res = await app.request("/app.js", {
+        headers: { Origin: "https://local.kiri.build" },
+      });
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://local.kiri.build");
+    });
+
+    it("omits CORS headers for disallowed origins", async () => {
+      const app = createApp({ db, registry, cwd });
+      const res = await app.request("/api/health", {
+        headers: { Origin: "https://evil.example" },
+      });
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    });
+
+    it("answers OPTIONS preflight on /api/workflows/:name/runs with 204 and the allow-* headers", async () => {
+      const app = createApp({ db, registry, cwd });
+      const res = await app.request("/api/workflows/anything/runs", {
+        method: "OPTIONS",
+        headers: {
+          Origin: "https://local.kiri.build",
+          "Access-Control-Request-Method": "POST",
+          "Access-Control-Request-Headers": "Content-Type",
+        },
+      });
+      expect(res.status).toBe(204);
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://local.kiri.build");
+      expect(res.headers.get("Access-Control-Allow-Methods")).toContain("POST");
+      expect(res.headers.get("Access-Control-Allow-Headers")).toContain("Content-Type");
+    });
+  });
 });
