@@ -1,12 +1,12 @@
 # yaml-language-server: $schema=../.kiri/workflow.schema.json
 
-name: open-prs
+name: PR Review Queue
 steps:
   - sh: |
-      cd "$KIRI_REPO_ROOT"
-      prs=$(gh pr list --state open)
+      set -eu
+      prs=$(gh search prs --review-requested=@me --state=open)
       if [ -z "$prs" ]; then
-        echo "No open pull requests."
+        echo "No PRs awaiting your review."
       else
         echo "$prs"
       fi
