@@ -8,6 +8,7 @@ import type { KiriDb } from "./db/index.ts";
 import { runs } from "./db/schema.ts";
 import { type KiriEvent, createEventBus } from "./events/index.ts";
 import { createApp } from "./index.ts";
+import { createCancelRegistry } from "./runner/cancel-registry.ts";
 import { type Registry, type WorkflowDefinition, createRegistry } from "./workflows/index.ts";
 
 describe("createApp", () => {
@@ -541,6 +542,245 @@ describe("createApp", () => {
         headers: { "X-Kiri-Client": "kiri-ui" },
       });
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("POST /api/runs/:id/cancel", () => {
+    it("is not mounted when no cancel registry is supplied", async () => {
+      const app = createApp({ db, registry, cwd });
+      const res = await app.request("/api/runs/anything/cancel", {
+        method: "POST",
+        headers: CLIENT_HEADERS,
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 404 for an unknown run id", async () => {
+      const cancelRegistry = createCancelRegistry();
+      const app = createApp({ db, registry, cwd, cancelRegistry });
+      const res = await app.request("/api/runs/missing/cancel", {
+        method: "POST",
+        headers: CLIENT_HEADERS,
+      });
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: 'run "missing" not found' });
+    });
+
+    it("returns 409 when the run is already in a terminal state", async () => {
+      writeBundle("quick", "#!/bin/sh\necho done\n");
+      const wf: WorkflowDefinition = { name: "quick", steps: [{ use: "quick" }] };
+      registry.replace(new Map([[wf.name, wf]]));
+
+      const cancelRegistry = createCancelRegistry();
+      const { bus, waitForFinished } = setupRunWaiter();
+      const app = createApp({ db, registry, cwd, bus, cancelRegistry });
+
+      const trigger = await app.request("/api/workflows/quick/runs", {
+        method: "POST",
+        headers: CLIENT_HEADERS,
+      });
+      const { runId } = (await trigger.json()) as { runId: string };
+      await waitForFinished(runId);
+
+      const res = await app.request(`/api/runs/${runId}/cancel`, {
+        method: "POST",
+        headers: CLIENT_HEADERS,
+      });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: `run "${runId}" is not in flight` });
+    });
+
+    it("accepts cancel for an in-flight run, returning 202; the run terminates as cancelled", async () => {
+      // `exec 1>&- 2>&-` closes sh's stdout/stderr before sleep is forked so
+      // Bun's pipe readers get EOF immediately on cancel; otherwise the
+      // orphaned sleep holds the write ends and hangs the readers (manifests
+      // as a CI-only timeout on Linux).
+      const wf: WorkflowDefinition = {
+        name: "long",
+        steps: [{ sh: "exec 1>&- 2>&-; sleep 5" }],
+      };
+      registry.replace(new Map([[wf.name, wf]]));
+
+      const cancelRegistry = createCancelRegistry({ sigkillDelayMs: 100 });
+      const { bus, waitForFinished } = setupRunWaiter();
+      const app = createApp({ db, registry, cwd, bus, cancelRegistry });
+
+      const trigger = await app.request("/api/workflows/long/runs", {
+        method: "POST",
+        headers: CLIENT_HEADERS,
+      });
+      const { runId } = (await trigger.json()) as { runId: string };
+
+      // Brief settle so the spawn's child is live before we signal it.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const res = await app.request(`/api/runs/${runId}/cancel`, {
+        method: "POST",
+        headers: CLIENT_HEADERS,
+      });
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({ runId });
+
+      await waitForFinished(runId);
+      const final = db.select().from(runs).where(eq(runs.id, runId)).get();
+      expect(final?.status).toBe("cancelled");
+    });
+
+    it("rejects cancel without the X-Kiri-Client header (CSRF gate)", async () => {
+      const cancelRegistry = createCancelRegistry();
+      const app = createApp({ db, registry, cwd, cancelRegistry });
+      const res = await app.request("/api/runs/anything/cancel", { method: "POST" });
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "X-Kiri-Client header required" });
+    });
+
+    it("returns 409 when the DB row says running but the registry has no entry (closing-window race)", async () => {
+      // Pre-seed a `running` row that the registry never registered. Mirrors
+      // the brief window where the runner has updated the DB to terminal but
+      // hasn't yet released — except in this test the runner isn't involved
+      // at all, so requestCancel returns false on this id.
+      const orphanId = "orphan-running";
+      db.insert(runs)
+        .values({
+          id: orphanId,
+          workflowName: "ghost",
+          status: "running",
+          trigger: "manual",
+          startedAt: new Date(),
+          definitionSnapshot: { name: "ghost", steps: [] },
+        })
+        .run();
+
+      const cancelRegistry = createCancelRegistry();
+      const app = createApp({ db, registry, cwd, cancelRegistry });
+      const res = await app.request(`/api/runs/${orphanId}/cancel`, {
+        method: "POST",
+        headers: CLIENT_HEADERS,
+      });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: `run "${orphanId}" is not in flight` });
+    });
+  });
+
+  describe("cancelled runs surfaced through the API", () => {
+    // `exec 1>&- 2>&-` closes sh's stdout/stderr before sleep is forked so
+    // Bun's pipe readers get EOF immediately on cancel; otherwise the
+    // orphaned sleep holds the write ends and hangs the readers (manifests
+    // as a CI-only timeout on Linux).
+    const cancellableWf = (name: string): WorkflowDefinition => ({
+      name,
+      steps: [{ sh: "exec 1>&- 2>&-; sleep 5" }],
+    });
+
+    const triggerAndCancel = async (
+      app: ReturnType<typeof createApp>,
+      name: string,
+      waitForFinished: (runId: string) => Promise<void>,
+    ): Promise<string> => {
+      const trigger = await app.request(`/api/workflows/${name}/runs`, {
+        method: "POST",
+        headers: CLIENT_HEADERS,
+      });
+      const { runId } = (await trigger.json()) as { runId: string };
+      // Settle so the spawned child is live before the cancel signal lands.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const cancel = await app.request(`/api/runs/${runId}/cancel`, {
+        method: "POST",
+        headers: CLIENT_HEADERS,
+      });
+      expect(cancel.status).toBe(202);
+      await waitForFinished(runId);
+      return runId;
+    };
+
+    it("renders a cancelled run on GET /api/runs/:id with cancelled step status and error", async () => {
+      const wf = cancellableWf("long");
+      registry.replace(new Map([[wf.name, wf]]));
+      const cancelRegistry = createCancelRegistry({ sigkillDelayMs: 100 });
+      const { bus, waitForFinished } = setupRunWaiter();
+      const app = createApp({ db, registry, cwd, bus, cancelRegistry });
+
+      const runId = await triggerAndCancel(app, "long", waitForFinished);
+
+      const res = await app.request(`/api/runs/${runId}`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        run: { status: string; error: { message: string } | null };
+        steps: Array<{ status: string; error: { message: string } | null }>;
+      };
+      expect(body.run.status).toBe("cancelled");
+      expect(body.run.error).toEqual({ message: "run cancelled" });
+      expect(body.steps).toHaveLength(1);
+      expect(body.steps[0].status).toBe("cancelled");
+      expect(body.steps[0].error).toEqual({ message: "run cancelled" });
+    });
+
+    it("includes cancelled runs in GET /api/runs with their cancelled status", async () => {
+      const wf = cancellableWf("long");
+      registry.replace(new Map([[wf.name, wf]]));
+      const cancelRegistry = createCancelRegistry({ sigkillDelayMs: 100 });
+      const { bus, waitForFinished } = setupRunWaiter();
+      const app = createApp({ db, registry, cwd, bus, cancelRegistry });
+
+      const runId = await triggerAndCancel(app, "long", waitForFinished);
+
+      const res = await app.request("/api/runs");
+      const body = (await res.json()) as Array<{ id: string; status: string }>;
+      const entry = body.find((r) => r.id === runId);
+      expect(entry?.status).toBe("cancelled");
+    });
+
+    it("returns 409 on a second cancel after the run has terminated (idempotent fail-stop)", async () => {
+      const wf = cancellableWf("long");
+      registry.replace(new Map([[wf.name, wf]]));
+      const cancelRegistry = createCancelRegistry({ sigkillDelayMs: 100 });
+      const { bus, waitForFinished } = setupRunWaiter();
+      const app = createApp({ db, registry, cwd, bus, cancelRegistry });
+
+      const runId = await triggerAndCancel(app, "long", waitForFinished);
+
+      const second = await app.request(`/api/runs/${runId}/cancel`, {
+        method: "POST",
+        headers: CLIENT_HEADERS,
+      });
+      expect(second.status).toBe(409);
+      expect(await second.json()).toEqual({ error: `run "${runId}" is not in flight` });
+    });
+
+    it("publishes run.finished with status cancelled to the bus when cancelled via HTTP", async () => {
+      const wf = cancellableWf("long");
+      registry.replace(new Map([[wf.name, wf]]));
+      const cancelRegistry = createCancelRegistry({ sigkillDelayMs: 100 });
+      const bus = createEventBus();
+      const seen: KiriEvent[] = [];
+      const finished = new Promise<void>((resolve) => {
+        bus.subscribe((e) => {
+          seen.push(e);
+          if (e.type === "run.finished") resolve();
+        });
+      });
+      const app = createApp({ db, registry, cwd, bus, cancelRegistry });
+
+      const trigger = await app.request("/api/workflows/long/runs", {
+        method: "POST",
+        headers: CLIENT_HEADERS,
+      });
+      const { runId } = (await trigger.json()) as { runId: string };
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await app.request(`/api/runs/${runId}/cancel`, {
+        method: "POST",
+        headers: CLIENT_HEADERS,
+      });
+
+      await finished;
+
+      expect(seen).toContainEqual({
+        type: "run.finished",
+        id: runId,
+        status: "cancelled",
+        workflowName: "long",
+      });
+      expect(seen).toContainEqual({ type: "run.updated", id: runId, status: "cancelled" });
     });
   });
 });

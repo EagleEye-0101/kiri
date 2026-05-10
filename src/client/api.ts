@@ -18,7 +18,7 @@ export interface WorkflowSummary {
  */
 export interface RunStartResult {
   runId: string;
-  status: "running" | "ok" | "failed";
+  status: "running" | "ok" | "failed" | "cancelled";
 }
 
 /**
@@ -29,7 +29,7 @@ export interface RunStartResult {
 export interface RunListEntry {
   id: string;
   workflowName: string;
-  status: "running" | "ok" | "failed";
+  status: "running" | "ok" | "failed" | "cancelled";
   trigger: string;
   startedAt: string;
   finishedAt: string | null;
@@ -61,7 +61,7 @@ export interface RunStepRow {
   runId: string;
   index: number;
   kind: string;
-  status: "running" | "ok" | "failed";
+  status: "running" | "ok" | "failed" | "cancelled";
   output: unknown;
   error: { message: string; stack?: string } | null;
   traces: { stdout: string; stderr: string; durationMs: number } | null;
@@ -140,4 +140,15 @@ export const fetchRun = async (id: string): Promise<RunDetail> =>
 export const triggerRun = async (name: string): Promise<RunStartResult> =>
   json<RunStartResult>(
     await apiFetch(`/api/workflows/${encodeURIComponent(name)}/runs`, { method: "POST" }),
+  );
+
+/**
+ * Request cancellation of an in-flight run. Resolves on 202 — the server
+ * has signalled the child process; the run's terminal `cancelled` status
+ * arrives on the SSE event stream. Throws `ApiError` on non-2xx (404 if
+ * the run doesn't exist, 409 if it's already terminal).
+ */
+export const cancelRun = async (id: string): Promise<{ runId: string }> =>
+  json<{ runId: string }>(
+    await apiFetch(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
   );
