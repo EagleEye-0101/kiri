@@ -4,11 +4,15 @@ import { http, HttpResponse } from "msw";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
 import { captureEventSources } from "../../../tests/setup/fake-event-source.ts";
+import { FakeIntersectionObserver } from "../../../tests/setup/fake-intersection-observer.ts";
 import { server } from "../../../tests/setup/msw.ts";
 import { LiveEventsProvider } from "../events/live.tsx";
 import { Dashboard } from "./dashboard.tsx";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  FakeIntersectionObserver.reset();
+});
 
 const renderDashboard = () => {
   const { hook } = memoryLocation({ path: "/" });
@@ -49,34 +53,269 @@ describe("<Dashboard>", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/failed to load runs/i);
   });
 
-  it("refetches the runs list when a run lifecycle event fires", async () => {
-    let calls = 0;
+  // Shape of a run row as the API returns it (and as our MSW handlers
+  // assemble it). Local helper to keep the test handlers readable.
+  const stubRunPayload = (id: string, workflowName: string, status = "ok") => ({
+    id,
+    workflowName,
+    status,
+    trigger: "manual",
+    startedAt: "2026-05-09T12:00:00.000Z",
+    finishedAt: status === "running" ? null : "2026-05-09T12:00:01.000Z",
+    error: null,
+    summary: null,
+    definitionSnapshot: { name: workflowName, steps: [] },
+    isInterrupted: false,
+  });
+
+  it("prepends a freshly-started run via a single-row fetch on run.started", async () => {
+    let pageOneCalls = 0;
     server.use(
       http.get("*/api/runs", () => {
-        calls++;
-        return HttpResponse.json([
-          {
-            id: `r${calls}`,
-            workflowName: `wf-${calls}`,
-            status: "ok",
-            trigger: "manual",
-            startedAt: "2026-05-09T12:00:00.000Z",
-            finishedAt: "2026-05-09T12:00:01.000Z",
-            error: null,
-            definitionSnapshot: { name: `wf-${calls}`, steps: [] },
-            isInterrupted: false,
-          },
-        ]);
+        pageOneCalls++;
+        return HttpResponse.json({
+          runs: [stubRunPayload("r1", "old-wf")],
+          nextCursor: null,
+        });
+      }),
+      http.get("*/api/runs/r-new", () =>
+        HttpResponse.json({
+          run: stubRunPayload("r-new", "fresh-wf", "running"),
+          steps: [],
+        }),
+      ),
+    );
+
+    const { sources } = renderDashboard();
+    await screen.findByText(/old-wf/);
+    expect(pageOneCalls).toBe(1);
+
+    act(() => sources[0]?.emit({ type: "run.started", id: "r-new" }));
+
+    await screen.findByText(/fresh-wf/);
+    // Crucially: no second page-one fetch — the prepend was surgical.
+    expect(pageOneCalls).toBe(1);
+  });
+
+  it("patches a loaded run in place on run.finished", async () => {
+    server.use(
+      http.get("*/api/runs", () =>
+        HttpResponse.json({
+          runs: [stubRunPayload("r1", "wf", "running")],
+          nextCursor: null,
+        }),
+      ),
+      http.get("*/api/runs/r1", () =>
+        HttpResponse.json({
+          run: stubRunPayload("r1", "wf", "ok"),
+          steps: [],
+        }),
+      ),
+    );
+
+    const { sources, container } = renderDashboard();
+    await waitFor(() => {
+      expect(container.querySelector('[data-status="running"]')).not.toBeNull();
+    });
+
+    act(() => {
+      sources[0]?.emit({ type: "run.finished", id: "r1", status: "ok", workflowName: "wf" });
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-status="ok"]')).not.toBeNull();
+    });
+  });
+
+  it("ignores a run.updated event for a row that isn't on any loaded page", async () => {
+    let detailFetches = 0;
+    server.use(
+      http.get("*/api/runs", () =>
+        HttpResponse.json({
+          runs: [stubRunPayload("r1", "wf")],
+          nextCursor: null,
+        }),
+      ),
+      http.get("*/api/runs/r-other", () => {
+        detailFetches++;
+        return HttpResponse.json({
+          run: stubRunPayload("r-other", "other-wf", "ok"),
+          steps: [],
+        });
+      }),
+    );
+
+    const { sources } = renderDashboard();
+    await screen.findByText(/^wf$/);
+
+    act(() => {
+      sources[0]?.emit({
+        type: "run.updated",
+        id: "r-other",
+        status: "ok",
+      });
+    });
+
+    // The fetch happens (we don't know yet whether the row is loaded
+    // until the response arrives), but the patch is a no-op.
+    await waitFor(() => expect(detailFetches).toBe(1));
+    expect(screen.queryByText(/other-wf/)).toBeNull();
+  });
+
+  it("refetches page one and merges by id on SSE reconnect", async () => {
+    let pageOneCalls = 0;
+    server.use(
+      http.get("*/api/runs", () => {
+        pageOneCalls++;
+        if (pageOneCalls === 1) {
+          return HttpResponse.json({
+            runs: [stubRunPayload("r1", "wf-1")],
+            nextCursor: null,
+          });
+        }
+        return HttpResponse.json({
+          runs: [stubRunPayload("r0", "fresh-wf"), stubRunPayload("r1", "wf-1")],
+          nextCursor: null,
+        });
       }),
     );
 
     const { sources } = renderDashboard();
     await screen.findByText(/wf-1/);
+    // Initial open doesn't count as a reconnect.
+    act(() => sources[0]?.triggerOpen());
+    expect(pageOneCalls).toBe(1);
 
-    act(() => {
-      sources[0]?.emit({ type: "run.started", id: "new" });
-    });
+    act(() => sources[0]?.triggerOpen());
+    await screen.findByText(/fresh-wf/);
+    expect(pageOneCalls).toBe(2);
+  });
 
-    await screen.findByText(/wf-2/);
+  it("logs and drops the prepend when the single-row fetch fails", async () => {
+    server.use(
+      http.get("*/api/runs", () =>
+        HttpResponse.json({ runs: [stubRunPayload("r1", "wf")], nextCursor: null }),
+      ),
+      http.get("*/api/runs/missing", () =>
+        HttpResponse.json({ error: 'run "missing" not found' }, { status: 404 }),
+      ),
+    );
+
+    const errors: unknown[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.join(" "));
+    };
+
+    try {
+      const { sources } = renderDashboard();
+      await screen.findByText(/wf/);
+      act(() => sources[0]?.emit({ type: "run.started", id: "missing" }));
+      await waitFor(() =>
+        expect(errors.some((line) => String(line).includes("run.started fetch failed"))).toBe(true),
+      );
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  it("logs and drops the patch when the single-row fetch fails", async () => {
+    server.use(
+      http.get("*/api/runs", () =>
+        HttpResponse.json({
+          runs: [stubRunPayload("r1", "wf", "running")],
+          nextCursor: null,
+        }),
+      ),
+      http.get("*/api/runs/r1", () => HttpResponse.json({ error: "boom" }, { status: 500 })),
+    );
+
+    const errors: unknown[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.join(" "));
+    };
+
+    try {
+      const { sources } = renderDashboard();
+      await screen.findByText(/wf/);
+      act(() => {
+        sources[0]?.emit({ type: "run.finished", id: "r1", status: "ok", workflowName: "wf" });
+      });
+      await waitFor(() =>
+        expect(errors.some((line) => String(line).includes("run.updated fetch failed"))).toBe(true),
+      );
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  // Page handlers reused across the pagination scenarios: page one
+  // points at the second page; page two ends the feed.
+  const seedTwoPages = () => {
+    server.use(
+      http.get("*/api/runs", ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get("cursor");
+        if (cursor === null) {
+          return HttpResponse.json({
+            runs: [
+              {
+                id: "r1",
+                workflowName: "page-one",
+                status: "ok",
+                trigger: "manual",
+                startedAt: "2026-05-09T12:00:00.000Z",
+                finishedAt: "2026-05-09T12:00:01.000Z",
+                error: null,
+                summary: null,
+                definitionSnapshot: { name: "page-one", steps: [] },
+                isInterrupted: false,
+              },
+            ],
+            nextCursor: "r1",
+          });
+        }
+        return HttpResponse.json({
+          runs: [
+            {
+              id: "r2",
+              workflowName: "page-two",
+              status: "ok",
+              trigger: "manual",
+              startedAt: "2026-05-09T11:55:00.000Z",
+              finishedAt: "2026-05-09T11:55:01.000Z",
+              error: null,
+              summary: null,
+              definitionSnapshot: { name: "page-two", steps: [] },
+              isInterrupted: false,
+            },
+          ],
+          nextCursor: null,
+        });
+      }),
+    );
+  };
+
+  it("loads the next page when the sentinel intersects", async () => {
+    seedTwoPages();
+    renderDashboard();
+    await screen.findByText(/page-one/);
+    expect(screen.queryByText(/page-two/)).toBeNull();
+
+    const observer = FakeIntersectionObserver.latest();
+    if (!observer) throw new Error("expected an IntersectionObserver to be registered");
+    act(() => observer.triggerIntersect());
+
+    await screen.findByText(/page-two/);
+    expect(screen.getByText(/end of feed/i)).toBeDefined();
+  });
+
+  it("shows the end-of-feed indicator immediately when the first page is the last", async () => {
+    renderDashboard();
+    await screen.findByText(/no runs yet/i);
+    // An empty feed renders the empty-state sentence, not an end-of-feed
+    // indicator — both convey the same thing but the empty-state copy
+    // is more readable.
+    expect(screen.queryByText(/end of feed/i)).toBeNull();
   });
 });
