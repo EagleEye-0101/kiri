@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { cors } from "hono/cors";
 import { z } from "zod";
+import { resolvePublishTitle } from "../shared/publish-title.ts";
 import type { KiriDb } from "./db/index.ts";
 import { runArtefacts, runSteps, runs } from "./db/schema.ts";
 import { EMBEDDED_FILES } from "./embedded-assets.ts";
@@ -10,7 +11,7 @@ import { type EventBus, mountEventsRoute } from "./events/index.ts";
 import type { CancelRegistry } from "./runner/cancel-registry.ts";
 import { runWorkflow } from "./runner/index.ts";
 import type { Registry, WorkflowDefinition } from "./workflows/index.ts";
-import { publishNameSchema, resolvePublishTitle } from "./workflows/schema.ts";
+import { publishNameSchema } from "./workflows/schema.ts";
 
 /**
  * Dependencies the HTTP API needs to do real work: the state DB, the live
@@ -291,13 +292,14 @@ export function createApp(deps: AppDeps): Hono {
     const id = c.req.param("id");
     const run = db.select().from(runs).where(eq(runs.id, id)).get();
     if (!run) return c.json({ error: `run "${id}" not found` }, 404);
-    // Publish-step rows are filtered out here so every consumer sees the
-    // same pipeline-only step list. The artefacts they produced live on
-    // the sibling `artefacts` field below.
+    // Publish and summary rows ship alongside pipeline steps; clients
+    // separate them by the `isPublish` / `isSummary` flags. This is what
+    // lets the run detail page render in-flight publish indicators while
+    // an artefact row hasn't yet been written.
     const steps = db
       .select()
       .from(runSteps)
-      .where(and(eq(runSteps.runId, id), eq(runSteps.isPublish, false)))
+      .where(eq(runSteps.runId, id))
       .orderBy(asc(runSteps.index))
       .all();
     // `content_md` is deliberately omitted — the artefact body is fetched

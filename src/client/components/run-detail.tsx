@@ -1,17 +1,20 @@
 import { useState } from "react";
 import { Link } from "wouter";
+import { resolvePublishTitle } from "../../shared/publish-title.ts";
 import type {
   RunArtefactSummary,
   RunDetail,
   RunListEntry,
   RunStepRow,
   StepMaterials,
+  WorkflowStepSummary,
 } from "../api.ts";
 import { formatDuration, formatDurationMs, formatRelativeTime } from "../formatters/format-time.ts";
 
-type StatusKind = "running" | "ok" | "failed" | "cancelled" | "interrupted";
+type StatusKind = "pending" | "running" | "ok" | "failed" | "cancelled" | "interrupted";
 
 const STRIP_BG: Record<StatusKind, string> = {
+  pending: "bg-status-pending",
   running: "bg-status-running",
   ok: "bg-status-ok",
   failed: "bg-status-failed",
@@ -20,6 +23,7 @@ const STRIP_BG: Record<StatusKind, string> = {
 };
 
 const STATUS_TEXT: Record<StatusKind, string> = {
+  pending: "text-status-pending",
   running: "text-status-running",
   ok: "text-status-ok",
   failed: "text-status-failed",
@@ -31,13 +35,88 @@ const SHELL_PREVIEW_LIMIT = 60;
 
 const runStatus = (run: RunListEntry): StatusKind => run.status;
 
-const stepKindLabel = (step: RunStepRow): string => {
-  if (step.materials.kind === "use") return `use: ${step.materials.bundle}`;
-  const firstLine = step.materials.source.split("\n", 1)[0] ?? "";
+// Activity-list item kinds; every row carries one so the unified list
+// still tells you which phase of the run produced each entry.
+type ActivityKind = "step" | "publishing" | "summarising";
+
+const KIND_LABEL: Record<ActivityKind, string> = {
+  step: "step",
+  publishing: "publishing",
+  summarising: "summarising",
+};
+
+const declaredStepLabel = (declared: WorkflowStepSummary): string => {
+  if ("use" in declared) return `use: ${declared.use}`;
+  const firstLine = declared.sh.split("\n", 1)[0] ?? "";
   const trimmed = firstLine.trim();
-  const truncated =
-    trimmed.length > SHELL_PREVIEW_LIMIT ? `${trimmed.slice(0, SHELL_PREVIEW_LIMIT)}…` : trimmed;
-  return `sh: ${truncated}`;
+  return `sh: ${trimmed.length > SHELL_PREVIEW_LIMIT ? `${trimmed.slice(0, SHELL_PREVIEW_LIMIT)}…` : trimmed}`;
+};
+
+interface ActivityItem {
+  key: string;
+  ordinal: number;
+  kind: ActivityKind;
+  title: string;
+  status: StatusKind;
+  /** The persisted step row, when the runner has reached this item. */
+  row: RunStepRow | undefined;
+}
+
+/**
+ * Synthesise the run's activity list from the snapshotted definition
+ * plus any persisted step rows. Activities declared but not yet
+ * reached by the runner appear as `pending`; rows present surface
+ * their actual status. Ordering matches execution order: pipeline
+ * steps → publishes → summariser.
+ */
+const buildActivityItems = (run: RunListEntry, steps: RunStepRow[]): ActivityItem[] => {
+  const rowByIndex = new Map<number, RunStepRow>();
+  for (const row of steps) rowByIndex.set(row.index, row);
+
+  const snap = run.definitionSnapshot;
+  const items: ActivityItem[] = [];
+
+  for (let i = 0; i < snap.steps.length; i++) {
+    const row = rowByIndex.get(i);
+    items.push({
+      key: row?.id ?? `step-${i}`,
+      ordinal: items.length + 1,
+      kind: "step",
+      title: declaredStepLabel(snap.steps[i]),
+      status: row?.status ?? "pending",
+      row,
+    });
+  }
+
+  const publishes = snap.publish ?? [];
+  for (let pi = 0; pi < publishes.length; pi++) {
+    const index = snap.steps.length + pi;
+    const row = rowByIndex.get(index);
+    const entry = publishes[pi];
+    items.push({
+      key: row?.id ?? `publish-${pi}`,
+      ordinal: items.length + 1,
+      kind: "publishing",
+      title: resolvePublishTitle(entry.name, entry.title),
+      status: row?.status ?? "pending",
+      row,
+    });
+  }
+
+  if (snap.summarize) {
+    const index = snap.steps.length + publishes.length;
+    const row = rowByIndex.get(index);
+    items.push({
+      key: row?.id ?? "summarise",
+      ordinal: items.length + 1,
+      kind: "summarising",
+      title: declaredStepLabel(snap.summarize),
+      status: row?.status ?? "pending",
+      row,
+    });
+  }
+
+  return items;
 };
 
 /**
@@ -45,9 +124,14 @@ const stepKindLabel = (step: RunStepRow): string => {
  * row to page-header scale: a thicker status strip on the left, the
  * status word as a coloured kicker, the workflow name in Fraunces, and
  * a single line of metadata in mono. Run-level failures render above
- * the step list so they're not buried in a disclosure. Each step is a
- * collapsible row carrying its envelope (stdout, stderr, error) and
- * the materials snapshot — the bytes that produced the run.
+ * the activity list so they're not buried in a disclosure.
+ *
+ * Everything the run intends to do — pipeline steps, publishes, the
+ * summariser — appears as one ordered activity list. Declared
+ * activities show as pending until the runner reaches them; running
+ * rows pulse; terminal rows expose their envelope and materials via
+ * disclosure. One list keeps the visual language consistent across
+ * phases of the run.
  *
  * `now` is injectable so component tests render deterministic relative
  * timestamps; production callers omit it and pick up the system clock.
@@ -68,8 +152,7 @@ export function RunDetailView({
 }) {
   const { run, steps, artefacts } = detail;
   const status = runStatus(run);
-  const regularSteps = steps.filter((s) => !s.isSummary);
-  const summaryStep = steps.find((s) => s.isSummary);
+  const activity = buildActivityItems(run, steps);
 
   return (
     <article>
@@ -141,35 +224,11 @@ export function RunDetailView({
 
       {run.summary && <RunSummaryBlock summary={run.summary} />}
 
-      {run.error && <RunFailureBlock error={run.error} />}
-
       {artefacts.length > 0 && <PublishedSection runId={run.id} artefacts={artefacts} now={now} />}
 
-      <section className="mt-12">
-        <header className="mb-6 flex items-baseline justify-between border-b border-rule pb-3">
-          <h3 className="text-xs tracking-widest text-ink-muted uppercase">Steps</h3>
-          <span className="font-mono text-xs text-ink-muted tabular-nums">
-            {regularSteps.length === 1 ? "1 step" : `${regularSteps.length} steps`}
-          </span>
-        </header>
-        {regularSteps.length === 0 ? (
-          <p className="font-display text-base text-ink-muted italic">no steps recorded.</p>
-        ) : (
-          <ol className="divide-y divide-rule">
-            {regularSteps.map((step, index) => (
-              <li
-                key={step.id}
-                style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
-                className="animate-[feed-row-in_320ms_ease-out_backwards]"
-              >
-                <StepRow step={step} />
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+      {run.error && <RunFailureBlock error={run.error} />}
 
-      {summaryStep && <SummarizerSection step={summaryStep} />}
+      <ActivitySection items={activity} />
     </article>
   );
 }
@@ -204,6 +263,108 @@ function CancelButton({ onCancel }: { onCancel: () => Promise<unknown> }) {
         <p role="alert" className="mt-2 max-w-xs font-mono text-xs text-status-failed normal-case">
           {error}
         </p>
+      )}
+    </div>
+  );
+}
+
+function ActivitySection({ items }: { items: ActivityItem[] }) {
+  const headingId = "activity-heading";
+  return (
+    <section className="mt-12">
+      <header className="mb-6 flex items-baseline justify-between border-b border-rule pb-3">
+        <h3 id={headingId} className="text-xs tracking-widest text-ink-muted uppercase">
+          Activity
+        </h3>
+        <span className="font-mono text-xs text-ink-muted tabular-nums">
+          {items.length === 1 ? "1 item" : `${items.length} items`}
+        </span>
+      </header>
+      {items.length === 0 ? (
+        <p className="font-display text-base text-ink-muted italic">no activity recorded.</p>
+      ) : (
+        <ol aria-labelledby={headingId} className="divide-y divide-rule">
+          {items.map((item, index) => (
+            <li
+              key={item.key}
+              style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
+              className="animate-[feed-row-in_320ms_ease-out_backwards]"
+            >
+              <ActivityRow item={item} />
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+function ActivityRow({ item }: { item: ActivityItem }) {
+  const { row, status, kind, title, ordinal } = item;
+  const [open, setOpen] = useState(false);
+  const ordinalText = String(ordinal).padStart(2, "0");
+  const isPending = status === "pending";
+  const titleClass = isPending ? "text-status-pending" : "text-ink";
+  const metaClass = isPending ? "text-status-pending" : "text-ink-muted";
+  const panelId = row ? `activity-${row.id}-panel` : undefined;
+
+  const rowContent = (
+    <>
+      <span
+        aria-hidden="true"
+        className={`absolute inset-y-2 left-1 w-0.5 ${row ? "transition-all duration-150 group-hover:w-[3px] " : ""}${STRIP_BG[status]}`}
+      />
+      <span className={`shrink-0 font-mono text-xs tabular-nums ${metaClass}`}>{ordinalText}</span>
+      <span
+        className={`w-20 shrink-0 font-mono text-[10px] tracking-widest uppercase ${metaClass}`}
+      >
+        {KIND_LABEL[kind]}
+      </span>
+      <span className={`min-w-0 flex-1 truncate font-mono text-sm ${titleClass}`}>{title}</span>
+      <span className={`shrink-0 text-xs tracking-widest uppercase ${STATUS_TEXT[status]}`}>
+        {status === "running" ? (
+          <span className="inline-flex items-baseline gap-1.5">
+            <span
+              aria-hidden="true"
+              className="inline-block h-1.5 w-1.5 animate-pulse self-center rounded-full bg-status-running"
+            />
+            running
+          </span>
+        ) : (
+          status
+        )}
+      </span>
+      <span className={`w-16 shrink-0 text-right font-mono text-xs tabular-nums ${metaClass}`}>
+        {row?.traces ? formatDurationMs(row.traces.durationMs) : "—"}
+      </span>
+      <span aria-hidden="true" className={`w-3 shrink-0 font-mono text-xs ${metaClass}`}>
+        {row ? (open ? "▴" : "▾") : ""}
+      </span>
+    </>
+  );
+
+  return (
+    <div data-status={status} data-kind={kind} className="group">
+      {row ? (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-controls={panelId}
+          className="relative flex w-full cursor-pointer items-baseline gap-5 px-5 py-4 text-left no-underline outline-none transition-colors duration-150 hover:bg-paper focus-visible:bg-paper focus-visible:outline-1 focus-visible:outline-accent focus-visible:-outline-offset-1"
+        >
+          {rowContent}
+        </button>
+      ) : (
+        <div className="relative flex items-baseline gap-5 px-5 py-4">{rowContent}</div>
+      )}
+      {open && row && (
+        <div id={panelId} className="space-y-6 px-5 pt-2 pb-6 pl-12">
+          <Trace label="stdout" body={row.traces?.stdout ?? ""} />
+          <Trace label="stderr" body={row.traces?.stderr ?? ""} />
+          {row.error && <StepError error={row.error} />}
+          <Materials materials={row.materials} />
+        </div>
       )}
     </div>
   );
@@ -255,53 +416,9 @@ function RunSummaryBlock({ summary }: { summary: string }) {
   return (
     <section className="mt-10 border-l-2 border-rule py-2 pl-5">
       <h3 className="text-xs tracking-widest text-ink-muted uppercase">Summary</h3>
-      <p className="mt-2 text-lg leading-relaxed text-ink">{summary}</p>
-    </section>
-  );
-}
-
-function SummarizerSection({ step }: { step: RunStepRow }) {
-  const [open, setOpen] = useState(false);
-  const status: StatusKind = step.status;
-  const panelId = `summarizer-${step.id}-panel`;
-
-  return (
-    <section className="mt-12">
-      <header className="mb-6 flex items-baseline justify-between border-b border-rule pb-3">
-        <h3 className="text-xs tracking-widest text-ink-muted uppercase">Summariser execution</h3>
-        <span className={`text-xs tracking-widest uppercase ${STATUS_TEXT[status]}`}>{status}</span>
-      </header>
-      <div data-status={status} className="group">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          aria-controls={panelId}
-          className="relative flex w-full cursor-pointer items-baseline gap-5 px-5 py-4 text-left no-underline outline-none transition-colors duration-150 hover:bg-paper focus-visible:bg-paper focus-visible:outline-1 focus-visible:outline-accent focus-visible:-outline-offset-1"
-        >
-          <span
-            aria-hidden="true"
-            className={`absolute inset-y-2 left-1 w-0.5 transition-all duration-150 group-hover:w-[3px] ${STRIP_BG[status]}`}
-          />
-          <span className="min-w-0 flex-1 truncate font-mono text-sm text-ink">
-            {stepKindLabel(step)}
-          </span>
-          <span className="w-16 shrink-0 text-right font-mono text-xs text-ink-muted tabular-nums">
-            {step.traces ? formatDurationMs(step.traces.durationMs) : "—"}
-          </span>
-          <span aria-hidden="true" className="shrink-0 font-mono text-xs text-ink-muted">
-            {open ? "▴" : "▾"}
-          </span>
-        </button>
-        {open && (
-          <div id={panelId} className="space-y-6 px-5 pt-2 pb-6 pl-12">
-            <Trace label="stdout" body={step.traces?.stdout ?? ""} />
-            <Trace label="stderr" body={step.traces?.stderr ?? ""} />
-            {step.error && <StepError error={step.error} />}
-            <Materials materials={step.materials} />
-          </div>
-        )}
-      </div>
+      <blockquote className="mt-2">
+        <p className="font-display text-base text-ink italic leading-relaxed">{summary}</p>
+      </blockquote>
     </section>
   );
 }
@@ -332,51 +449,6 @@ function RunFailureBlock({ error }: { error: { message: string; stack?: string }
         </>
       )}
     </section>
-  );
-}
-
-function StepRow({ step }: { step: RunStepRow }) {
-  const [open, setOpen] = useState(false);
-  const status: StatusKind = step.status;
-  const panelId = `step-${step.id}-panel`;
-  const stepNumber = String(step.index + 1).padStart(2, "0");
-
-  return (
-    <div data-status={status} className="group">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-controls={panelId}
-        className="relative flex w-full cursor-pointer items-baseline gap-5 px-5 py-4 text-left no-underline outline-none transition-colors duration-150 hover:bg-paper focus-visible:bg-paper focus-visible:outline-1 focus-visible:outline-accent focus-visible:-outline-offset-1"
-      >
-        <span
-          aria-hidden="true"
-          className={`absolute inset-y-2 left-1 w-0.5 transition-all duration-150 group-hover:w-[3px] ${STRIP_BG[status]}`}
-        />
-        <span className="shrink-0 font-mono text-xs text-ink-muted tabular-nums">{stepNumber}</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-sm text-ink">
-          {stepKindLabel(step)}
-        </span>
-        <span className={`shrink-0 text-xs tracking-widest uppercase ${STATUS_TEXT[status]}`}>
-          {status}
-        </span>
-        <span className="w-16 shrink-0 text-right font-mono text-xs text-ink-muted tabular-nums">
-          {step.traces ? formatDurationMs(step.traces.durationMs) : "—"}
-        </span>
-        <span aria-hidden="true" className="shrink-0 font-mono text-xs text-ink-muted">
-          {open ? "▴" : "▾"}
-        </span>
-      </button>
-      {open && (
-        <div id={panelId} className="space-y-6 px-5 pt-2 pb-6 pl-12">
-          <Trace label="stdout" body={step.traces?.stdout ?? ""} />
-          <Trace label="stderr" body={step.traces?.stderr ?? ""} />
-          {step.error && <StepError error={step.error} />}
-          <Materials materials={step.materials} />
-        </div>
-      )}
-    </div>
   );
 }
 
