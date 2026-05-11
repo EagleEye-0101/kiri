@@ -8,7 +8,7 @@ import type {
   TdHTMLAttributes,
   ThHTMLAttributes,
 } from "react";
-import Markdown, { type Components, type ExtraProps } from "react-markdown";
+import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const isExternalHref = (href: string): boolean => {
@@ -33,8 +33,12 @@ function Anchor({
   className,
   ...rest
 }: AnchorHTMLAttributes<HTMLAnchorElement> & ExtraProps) {
+  // `relative` is intentional: it keeps the anchor clickable when the
+  // surrounding container uses a stacked-link pattern (an absolute
+  // `::before` overlay covering the row, e.g. the activity feed). On
+  // surfaces without an overlay it's a no-op — no inset, no z-index.
   const classes =
-    "text-accent underline underline-offset-2 transition-colors hover:text-ink focus-visible:text-ink focus-visible:outline-1 focus-visible:outline-accent";
+    "relative text-accent underline underline-offset-2 transition-colors hover:text-ink focus-visible:text-ink focus-visible:outline-1 focus-visible:outline-accent";
   if (href !== undefined && isExternalHref(href)) {
     return (
       <a
@@ -329,7 +333,7 @@ const components: Components = {
 };
 
 /**
- * Render a published artefact's markdown body. Built on `react-markdown`,
+ * Render a markdown string as React elements. Built on `react-markdown`,
  * which parses markdown to React elements directly — there is no HTML
  * string and no `dangerouslySetInnerHTML` call site at all. Raw HTML in
  * the source is not parsed: literal tags like `<script>` land as text,
@@ -342,13 +346,15 @@ const components: Components = {
  * the SPA) are decorated with `target="_blank"` and
  * `rel="noopener noreferrer"`; same-origin and fragment links pass
  * through untouched.
+ *
+ * Used by every surface that renders markdown — published artefacts,
+ * activity-feed summaries, the run-detail summary block — so each one
+ * inherits the same sandboxing and editorial styling.
  */
-export function ArtefactMarkdown({ content }: { content: string }) {
+export function Markdown({ content }: { content: string }) {
   return (
-    <div className="artefact-markdown">
-      <Markdown components={components} remarkPlugins={[remarkGfm]}>
-        {content}
-      </Markdown>
-    </div>
+    <ReactMarkdown components={components} remarkPlugins={[remarkGfm]}>
+      {content}
+    </ReactMarkdown>
   );
 }

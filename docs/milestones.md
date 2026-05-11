@@ -15,7 +15,7 @@ These are constraints, not work items. They hold for every milestone below.
 - Every run snapshots the resolved workflow definition and per-step materials at start; feed entries always reflect the exact code that ran
 - Per-run scratch directory; steps never run with cwd of repo or home
 - Per-step env scope; user `env:` applied first, kiri- and OS-controlled vars overwrite on collision; `KIRI_` prefix reserved
-- Step output rendered as plain text in the UI. Markdown rendering is reserved for `publish:` artefacts (M6), where it's the explicit content type with a sandboxed renderer.
+- Step output rendered as plain text in the UI. Markdown rendering is reserved for surfaces with explicit content semantics — `publish:` artefacts (M6) and `summarize:` summaries — routed through the same sandboxed renderer. Raw step stdout/stderr stays plain text.
 
 ## M4 — Configurable summariser
 
@@ -69,7 +69,7 @@ Work items:
 - Summariser context: the envelope JSON written to `KIRI_RUN_CONTEXT_FILE` for the summariser includes the successful artefacts so the summary can reference them.
 - Router: `/runs/:id/published/:name` artefact page. Full-width markdown rendered through a sandboxed parser (`marked` + `DOMPurify`, no raw-HTML pass-through). Header shows workflow / run id / created-at with a back link to the run page.
 - Run detail page: "Published" section above the steps, one row per artefact (title + link to the dedicated page).
-- Activity feed: per-row chip list of artefact titles when present; chips link to the artefact page. Collapse to "📄 N artefacts" at 4+ to keep the row compact.
+- Activity feed: per-row chip list of artefact titles when present; chips link to the artefact page. Collapse to a single "N artefacts" chip at 4+ to keep the row compact.
 - Examples: rewrite `hackernews-digest` to publish a full markdown article and have the summariser highlight the top story.
 
 **Done when:** running a workflow with `publish: [...]` produces accessible markdown artefacts; chips appear on the relevant feed rows; the run page lists them under a "Published" section; clicking a chip opens the dedicated artefact page rendered as full markdown.
@@ -149,4 +149,4 @@ Security (deliberately not built — single-user ephemeral local tool):
 - Kernel sandboxing of step execution (e.g. macOS Seatbelt). Revisit if a bundle-install mechanism ever lands; until then bundles are user-authored and trusted as such.
 - Secret store mechanism (use env vars; revisit if it becomes painful)
 - Output secret-pattern scrubbing
-- UI sanitisation beyond plain-text rendering for step output. Markdown rendering for `publish:` artefacts is the documented exception, gated to a hardened parser.
+- UI sanitisation beyond plain-text rendering for step output. Markdown rendering for `publish:` artefacts and `summarize:` summaries is the documented exception, gated to a hardened parser.

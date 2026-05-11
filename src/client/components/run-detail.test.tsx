@@ -20,6 +20,7 @@ const stubRun = (overrides: Partial<RunListEntry> = {}): RunListEntry => ({
   summary: null,
   definitionSnapshot: { name: "kiri-self-review", steps: [{ sh: "echo hello, world" }] },
   isInterrupted: false,
+  artefacts: [],
   ...overrides,
 });
 
@@ -44,9 +45,8 @@ const stubDetail = (
   steps: RunStepRow[] = [],
   artefacts: RunArtefactSummary[] = [],
 ): RunDetail => ({
-  run: stubRun(run),
+  run: stubRun({ ...run, artefacts }),
   steps,
-  artefacts,
 });
 
 const renderDetail = (detail: RunDetail, opts: { onCancel?: () => Promise<unknown> } = {}) => {
@@ -627,10 +627,22 @@ describe("<RunDetailView>", () => {
       expect(screen.queryByText(/^summary$/i)).toBeNull();
     });
 
-    it("wraps the summary text in a blockquote so it reads as a quote", () => {
-      const { container } = renderDetail(stubDetail({ summary: "Quoted text body." }));
-      const quote = container.querySelector("blockquote");
-      expect(quote?.textContent).toContain("Quoted text body.");
+    it("renders a list-shaped summary as a bullet list, not as one prose run", () => {
+      const summary = [
+        "- **#42** payments: refund flow tweaks",
+        "- **#43** auth: rotate session secret",
+      ].join("\n");
+      renderDetail(stubDetail({ summary }));
+      // Scope to the Summary section so the Activity <ol> below doesn't bleed
+      // into the listitem query.
+      const summarySection = screen.getByText(/^summary$/i).closest("section");
+      const bullets = Array.from(summarySection?.querySelectorAll("li") ?? []).map(
+        (li) => li.textContent ?? "",
+      );
+      expect(bullets).toEqual([
+        "#42 payments: refund flow tweaks",
+        "#43 auth: rotate session secret",
+      ]);
     });
   });
 
