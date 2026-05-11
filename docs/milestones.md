@@ -46,7 +46,7 @@ Work items:
 - Intersection observer on a sentinel near the bottom of the feed triggers loading the next page.
 - Live-event compatibility: `run.started` prepends a new row at the top; `run.updated` / `run.finished` patch the matching visible row; new pages append below without disturbing rows already on-screen.
 - On (re)connect, refetch the first page only — recovers without reloading the entire feed history.
-- Empty state, end-of-feed indicator, loading sentinel — all in the gov.uk design language already established in M3.5.
+- Empty state, end-of-feed indicator, loading sentinel — styled consistently with the existing feed.
 
 **Done when:** the feed fetches one page on mount; scrolling near the bottom loads subsequent pages; live events continue to flow correctly; cold load latency is independent of total run count.
 

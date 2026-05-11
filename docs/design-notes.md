@@ -316,7 +316,7 @@ Sequenced for fastest path to dogfooding, then layering capability outward. Each
 3. **`claude-code` bundle starter** (M2). `kiri init` ships `scripts/claude-code/`; a working CC runner that translates `env:` keys to CC flags, spawns `claude`, captures the session.
 4. **Hosted shell** (M2.5). `https://local.kiri.build` — a static Cloudflare Pages shell that loads the locally-running kiri's bundle. Stable bundle paths, CORS allow-list.
 5. **Security baseline** (M3). Bind to `127.0.0.1` only; require `X-Kiri-Client` header on state-changing endpoints — shuts down cross-origin attacks from other browser tabs.
-6. **UX foundation + test infra** (M3.5). Tailwind v4 in the gov.uk design language; `wouter` router with `/` and `/runs/:id`; `bun:test` + `happy-dom` + `@testing-library/react`; Playwright golden-path e2e.
+6. **UX foundation + test infra** (M3.5). Tailwind v4; `wouter` router with `/` and `/runs/:id`; `bun:test` + `happy-dom` + `@testing-library/react`; Playwright golden-path e2e.
 7. **Live updates, toasts, cancel** (M3.9). In-process event bus, SSE endpoint, EventSource cache invalidation, completion toasts, in-flight cancel.
 8. **Activity feed summaries** (M3.95). Workflow-level `summarize:` field, `claude-code-summarizer` bundle, summary rendered in feed and at the top of run detail.
 9. **Onboarding & docs** (M3.97). Hosted-shell fallback when no local kiri is running, one-sheet docs site at `/docs`, in-app link.
