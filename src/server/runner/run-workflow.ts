@@ -1,10 +1,11 @@
-import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { resolvePublishTitle } from "../../shared/publish-title.ts";
 import type { KiriDb } from "../db/index.ts";
 import { runArtefacts, runSteps, runs } from "../db/schema.ts";
 import type { EventBus } from "../events/index.ts";
+import { resolveGitHead } from "../git/head.ts";
 import {
   type PublishEntry,
   type WorkflowDefinition,
@@ -68,18 +69,6 @@ type ExecutedStep = ({ kind: "use"; use: string } | { kind: "sh"; sh: string }) 
   error: { message: string; stack?: string } | null;
 };
 
-/**
- * Per-step materials snapshot persisted to `run_steps.materials`.
- *
- * - `use:` steps capture every file in the bundle directory keyed by
- *   path relative to the bundle (top-level files only — sub-directories
- *   skipped for now since no real bundle needs them yet).
- * - `sh:` steps capture the inline shell text under a single `source` key.
- */
-type StepMaterials =
-  | { kind: "use"; bundle: string; files: Record<string, string> }
-  | { kind: "sh"; source: string };
-
 const snapshotDefinition = (def: WorkflowDefinition): DefinitionSnapshot => ({
   name: def.name,
   steps: def.steps.map((s) => ({ ...s })),
@@ -92,39 +81,11 @@ const snapshotDefinition = (def: WorkflowDefinition): DefinitionSnapshot => ({
 const publishAsStep = (entry: PublishEntry): WorkflowStep =>
   isUsePublish(entry) ? { use: entry.use, env: entry.env } : { sh: entry.sh, env: entry.env };
 
-const snapshotBundle = (bundleDir: string): Record<string, string> => {
-  let entries: string[];
-  try {
-    entries = readdirSync(bundleDir);
-  } catch {
-    // Missing or unreadable bundle dir: record an empty snapshot. The
-    // spawn will fail with the same root cause and surface it via the
-    // envelope.
-    return {};
-  }
-  const files: Record<string, string> = {};
-  for (const name of entries) {
-    const abs = join(bundleDir, name);
-    if (!statSync(abs).isFile()) continue;
-    files[name] = readFileSync(abs, "utf8");
-  }
-  return files;
-};
-
-const captureMaterials = (step: WorkflowStep, cwd: string): StepMaterials => {
-  if (isUseStep(step)) {
-    const bundleDir = join(cwd, "scripts", step.use);
-    return { kind: "use", bundle: step.use, files: snapshotBundle(bundleDir) };
-  }
-  return { kind: "sh", source: step.sh };
-};
-
 const buildEnv = (
   step: WorkflowStep,
   runId: string,
   stepIndex: number,
   cwd: string,
-  scratchDir: string,
 ): Record<string, string> => {
   // User env is applied first; kiri- and OS-controlled vars overwrite on
   // collision so a workflow can't redirect PATH or shadow KIRI_ identity.
@@ -140,7 +101,6 @@ const buildEnv = (
   env.KIRI_RUN_ID = runId;
   env.KIRI_STEP_INDEX = String(stepIndex);
   env.KIRI_REPO_ROOT = cwd;
-  env.KIRI_META_FILE = join(scratchDir, `step-${stepIndex}.meta.json`);
   // use: steps run with cwd = scratchDir, so the bundle can't reach its
   // own sidecar files via relative paths. KIRI_BUNDLE_DIR points at the
   // bundle source; sh: steps don't have a bundle so it stays unset.
@@ -156,17 +116,16 @@ const buildEnv = (
  * Step execution and finalisation continue in the background; await `done`
  * when the caller needs the terminal status (e.g. cron, tests).
  *
- * Lifecycle, in order: insert `runs` with the definition snapshot →
- * create the per-run scratch dir → for each step, capture materials and
+ * Lifecycle, in order: insert `runs` with the definition snapshot and
+ * data-repo git ref → create the per-run scratch dir → for each step,
  * insert `run_steps` *before* spawning → execute the step → update the
  * row with the envelope → halt on first failure → finalize the `runs`
  * row → remove the scratch dir.
  *
- * Snapshot rows always reflect the bytes that ran, even if the bundle
- * file is later edited or deleted. Halt-on-failure: a failed step leaves
- * later steps uncreated, and the run is marked failed. `done` rejects if
- * any non-envelope surface (mkdir, drizzle) throws — the `runs` row is
- * still finalised to "failed" before the rejection.
+ * Halt-on-failure: a failed step leaves later steps uncreated, and the
+ * run is marked failed. `done` rejects if any non-envelope surface
+ * (mkdir, drizzle) throws — the `runs` row is still finalised to
+ * "failed" before the rejection.
  */
 export function runWorkflow(
   db: KiriDb,
@@ -176,6 +135,7 @@ export function runWorkflow(
   const runId = crypto.randomUUID();
   const scratchDir = join(args.cwd, ".kiri", "runs", runId);
   const startedAt = new Date();
+  const gitHead = resolveGitHead(args.cwd);
 
   db.insert(runs)
     .values({
@@ -185,6 +145,8 @@ export function runWorkflow(
       trigger: args.trigger,
       startedAt,
       definitionSnapshot: snapshotDefinition(definition),
+      gitSha: gitHead.sha,
+      gitDirty: gitHead.dirty,
     })
     .run();
 
@@ -209,7 +171,6 @@ export function runWorkflow(
         if (args.cancelRegistry?.isCancelled(runId)) break;
 
         const step = definition.steps[i];
-        const materials = captureMaterials(step, args.cwd);
 
         const stepId = crypto.randomUUID();
         db.insert(runSteps)
@@ -219,7 +180,6 @@ export function runWorkflow(
             index: i,
             kind: isUseStep(step) ? "use" : "sh",
             status: "running",
-            materials,
           })
           .run();
 
@@ -230,7 +190,7 @@ export function runWorkflow(
           cwd: args.cwd,
           scratchDir,
           input,
-          env: buildEnv(step, runId, i, args.cwd, scratchDir),
+          env: buildEnv(step, runId, i, args.cwd),
           onSpawn: (proc) => args.cancelRegistry?.setChild(runId, proc),
         });
 
@@ -307,7 +267,6 @@ export function runWorkflow(
         const entry = publishes[pi];
         const publishStep = publishAsStep(entry);
         const publishIndex = definition.steps.length + pi;
-        const materials = captureMaterials(publishStep, args.cwd);
 
         const stepId = crypto.randomUUID();
         db.insert(runSteps)
@@ -317,7 +276,6 @@ export function runWorkflow(
             index: publishIndex,
             kind: isUseStep(publishStep) ? "use" : "sh",
             status: "running",
-            materials,
             isPublish: true,
           })
           .run();
@@ -346,7 +304,7 @@ export function runWorkflow(
           ),
         );
 
-        const env = buildEnv(publishStep, runId, publishIndex, args.cwd, scratchDir);
+        const env = buildEnv(publishStep, runId, publishIndex, args.cwd);
         env.KIRI_RUN_CONTEXT_FILE = contextFile;
 
         const envelope = await runStep({
@@ -430,7 +388,6 @@ export function runWorkflow(
           ),
         );
 
-        const materials = captureMaterials(summarizeStep, args.cwd);
         const stepId = crypto.randomUUID();
         db.insert(runSteps)
           .values({
@@ -439,7 +396,6 @@ export function runWorkflow(
             index: summaryIndex,
             kind: isUseStep(summarizeStep) ? "use" : "sh",
             status: "running",
-            materials,
             isSummary: true,
           })
           .run();
@@ -451,7 +407,7 @@ export function runWorkflow(
           status: "running",
         });
 
-        const env = buildEnv(summarizeStep, runId, summaryIndex, args.cwd, scratchDir);
+        const env = buildEnv(summarizeStep, runId, summaryIndex, args.cwd);
         env.KIRI_RUN_CONTEXT_FILE = contextFile;
 
         const envelope = await runStep({

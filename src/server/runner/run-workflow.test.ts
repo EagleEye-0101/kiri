@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,16 +68,11 @@ describe("runWorkflow", () => {
     expect(step.kind).toBe("use");
     expect(step.status).toBe("ok");
     expect(step.output).toBe("hi from kiri\n");
-    expect(step.materials).toEqual({
-      kind: "use",
-      bundle: "hello",
-      files: { "run.sh": "#!/bin/sh\necho hi from kiri\n" },
-    });
     expect(step.error).toBeNull();
     expect(step.traces).toMatchObject({ stdout: "hi from kiri\n", stderr: "" });
   });
 
-  it("persists an inline sh: step with materials = { kind: 'sh', source }", async () => {
+  it("persists an inline sh: step", async () => {
     const wf = makeWorkflow("inline", [{ sh: "echo from-inline" }]);
 
     const result = await runWorkflow(db, wf, { cwd, trigger: "manual" }).done;
@@ -85,48 +81,6 @@ describe("runWorkflow", () => {
     const step = db.select().from(runSteps).where(eq(runSteps.runId, result.runId)).get();
     expect(step?.kind).toBe("sh");
     expect(step?.output).toBe("from-inline\n");
-    expect(step?.materials).toEqual({ kind: "sh", source: "echo from-inline" });
-  });
-
-  it("captures bundle sidecar files in the use: materials snapshot", async () => {
-    writeBundle("with-sidecar", '#!/bin/sh\ncat "$KIRI_BUNDLE_DIR/sidecar.txt"\n', {
-      "sidecar.txt": "sidecar-payload\n",
-    });
-    const wf = makeWorkflow("sidecar", useSteps("with-sidecar"));
-
-    const result = await runWorkflow(db, wf, { cwd, trigger: "manual" }).done;
-
-    expect(result.status).toBe("ok");
-    const step = db.select().from(runSteps).where(eq(runSteps.runId, result.runId)).get();
-    // Sidecar reachable at runtime via KIRI_BUNDLE_DIR (cwd is the per-run scratch dir).
-    expect(step?.output).toBe("sidecar-payload\n");
-    expect(step?.materials).toEqual({
-      kind: "use",
-      bundle: "with-sidecar",
-      files: {
-        "run.sh": '#!/bin/sh\ncat "$KIRI_BUNDLE_DIR/sidecar.txt"\n',
-        "sidecar.txt": "sidecar-payload\n",
-      },
-    });
-  });
-
-  it("skips sub-directories inside a bundle when snapshotting materials", async () => {
-    writeBundle("with-subdir", "#!/bin/sh\necho hi\n");
-    mkdirSync(join(cwd, "scripts", "with-subdir", "prompts"));
-    writeFileSync(
-      join(cwd, "scripts", "with-subdir", "prompts", "system.txt"),
-      "ignored payload\n",
-    );
-    const wf = makeWorkflow("subdir", useSteps("with-subdir"));
-
-    const result = await runWorkflow(db, wf, { cwd, trigger: "manual" }).done;
-
-    const step = db.select().from(runSteps).where(eq(runSteps.runId, result.runId)).get();
-    expect(step?.materials).toEqual({
-      kind: "use",
-      bundle: "with-subdir",
-      files: { "run.sh": "#!/bin/sh\necho hi\n" },
-    });
   });
 
   it("pipes step output to the next step's stdin (mixed use → sh)", async () => {
@@ -167,18 +121,56 @@ describe("runWorkflow", () => {
     expect(steps[0].error).not.toBeNull();
   });
 
-  it("captures bundle source at run start; later edits don't change the snapshot", async () => {
-    const runPath = writeBundle("v", "#!/bin/sh\necho v1\n");
-    const wf = makeWorkflow("snap", useSteps("v"));
+  describe("git ref", () => {
+    const git = (at: string, ...args: string[]) => {
+      const r = spawnSync("git", args, { cwd: at, encoding: "utf8" });
+      if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+    };
 
-    const result = await runWorkflow(db, wf, { cwd, trigger: "manual" }).done;
-    writeFileSync(runPath, "#!/bin/sh\necho v2\n");
+    it("leaves gitSha/gitDirty null when the data dir is not a git repo", async () => {
+      writeBundle("n", "#!/bin/sh\necho hi\n");
+      const wf = makeWorkflow("no-git", useSteps("n"));
 
-    const step = db.select().from(runSteps).where(eq(runSteps.runId, result.runId)).get();
-    expect(step?.materials).toEqual({
-      kind: "use",
-      bundle: "v",
-      files: { "run.sh": "#!/bin/sh\necho v1\n" },
+      const result = await runWorkflow(db, wf, { cwd, trigger: "manual" }).done;
+
+      const run = db.select().from(runs).where(eq(runs.id, result.runId)).get();
+      expect(run?.gitSha).toBeNull();
+      expect(run?.gitDirty).toBeNull();
+    });
+
+    it("captures HEAD sha with dirty=false when the data dir is a clean repo", async () => {
+      writeBundle("n", "#!/bin/sh\necho hi\n");
+      git(cwd, "init", "-q");
+      git(cwd, "config", "user.email", "test@example.com");
+      git(cwd, "config", "user.name", "Test");
+      git(cwd, "add", ".");
+      git(cwd, "commit", "-q", "-m", "init");
+      const wf = makeWorkflow("clean", useSteps("n"));
+
+      const result = await runWorkflow(db, wf, { cwd, trigger: "manual" }).done;
+
+      const run = db.select().from(runs).where(eq(runs.id, result.runId)).get();
+      expect(run?.gitSha).toMatch(/^[0-9a-f]{40}$/);
+      // The runner writes .kiri/runs/<id>/... mid-run; by the time we read
+      // the row that scratch dir is cleaned up so the tree is clean again.
+      expect(run?.gitDirty).toBe(false);
+    });
+
+    it("captures dirty=true when the working tree has uncommitted changes", async () => {
+      writeBundle("n", "#!/bin/sh\necho hi\n");
+      git(cwd, "init", "-q");
+      git(cwd, "config", "user.email", "test@example.com");
+      git(cwd, "config", "user.name", "Test");
+      git(cwd, "add", ".");
+      git(cwd, "commit", "-q", "-m", "init");
+      writeFileSync(join(cwd, "uncommitted.txt"), "hello");
+      const wf = makeWorkflow("dirty", useSteps("n"));
+
+      const result = await runWorkflow(db, wf, { cwd, trigger: "manual" }).done;
+
+      const run = db.select().from(runs).where(eq(runs.id, result.runId)).get();
+      expect(run?.gitSha).toMatch(/^[0-9a-f]{40}$/);
+      expect(run?.gitDirty).toBe(true);
     });
   });
 
@@ -229,7 +221,6 @@ describe("runWorkflow", () => {
     expect(result.status).toBe("failed");
     const step = db.select().from(runSteps).where(eq(runSteps.runId, result.runId)).get();
     expect(step?.status).toBe("failed");
-    expect(step?.materials).toEqual({ kind: "use", bundle: "ghost", files: {} });
     expect(step?.error).not.toBeNull();
   });
 
@@ -257,10 +248,10 @@ describe("runWorkflow", () => {
     expect(allRuns[0].error).not.toBeNull();
   });
 
-  it("exposes KIRI_RUN_ID, KIRI_STEP_INDEX, KIRI_REPO_ROOT, KIRI_META_FILE, and KIRI_BUNDLE_DIR for use: steps", async () => {
+  it("exposes KIRI_RUN_ID, KIRI_STEP_INDEX, KIRI_REPO_ROOT, and KIRI_BUNDLE_DIR for use: steps", async () => {
     writeBundle(
       "dump",
-      '#!/bin/sh\necho "RUN=$KIRI_RUN_ID STEP=$KIRI_STEP_INDEX ROOT=$KIRI_REPO_ROOT META=$KIRI_META_FILE BUNDLE=$KIRI_BUNDLE_DIR"\n',
+      '#!/bin/sh\necho "RUN=$KIRI_RUN_ID STEP=$KIRI_STEP_INDEX ROOT=$KIRI_REPO_ROOT BUNDLE=$KIRI_BUNDLE_DIR"\n',
     );
     const wf = makeWorkflow("env-vars", useSteps("dump"));
 
@@ -268,7 +259,7 @@ describe("runWorkflow", () => {
 
     const step = db.select().from(runSteps).where(eq(runSteps.runId, result.runId)).get();
     expect(step?.output).toBe(
-      `RUN=${result.runId} STEP=0 ROOT=${cwd} META=${join(cwd, ".kiri", "runs", result.runId, "step-0.meta.json")} BUNDLE=${join(cwd, "scripts", "dump")}\n`,
+      `RUN=${result.runId} STEP=0 ROOT=${cwd} BUNDLE=${join(cwd, "scripts", "dump")}\n`,
     );
   });
 
@@ -651,11 +642,6 @@ describe("runWorkflow", () => {
       expect(stepsRows[0].isSummary).toBe(false);
       expect(stepsRows[1].isSummary).toBe(true);
       expect(stepsRows[1].kind).toBe("use");
-      expect(stepsRows[1].materials).toEqual({
-        kind: "use",
-        bundle: "summer",
-        files: { "run.sh": "#!/bin/sh\necho summary\n" },
-      });
     });
 
     it("works with an inline sh: summarize step", async () => {
@@ -680,7 +666,6 @@ describe("runWorkflow", () => {
         .all()
         .find((s) => s.isSummary);
       expect(summaryStep?.kind).toBe("sh");
-      expect(summaryStep?.materials).toEqual({ kind: "sh", source: "echo inline-summary" });
     });
 
     it("leaves runs.status unchanged when the summariser fails", async () => {
@@ -916,15 +901,9 @@ describe("runWorkflow", () => {
       expect(stepsRows[1].isPublish).toBe(true);
       expect(stepsRows[1].isSummary).toBe(false);
       expect(stepsRows[1].kind).toBe("use");
-      expect(stepsRows[1].materials).toEqual({
-        kind: "use",
-        bundle: "digest",
-        files: { "run.sh": "#!/bin/sh\necho digest-body\n" },
-      });
       expect(stepsRows[2].index).toBe(2);
       expect(stepsRows[2].isPublish).toBe(true);
       expect(stepsRows[2].kind).toBe("sh");
-      expect(stepsRows[2].materials).toEqual({ kind: "sh", source: 'echo "from-sh"' });
     });
 
     it("places publish rows between steps and summarise in the index sequence", async () => {

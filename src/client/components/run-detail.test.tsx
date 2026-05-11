@@ -19,6 +19,8 @@ const stubRun = (overrides: Partial<RunListEntry> = {}): RunListEntry => ({
   error: null,
   summary: null,
   definitionSnapshot: { name: "kiri-self-review", steps: [{ sh: "echo hello, world" }] },
+  gitSha: null,
+  gitDirty: null,
   isInterrupted: false,
   artefacts: [],
   ...overrides,
@@ -33,8 +35,6 @@ const stubStep = (overrides: Partial<RunStepRow> = {}): RunStepRow => ({
   output: null,
   error: null,
   traces: { stdout: "hello, world", stderr: "", durationMs: 1_400 },
-  usage: null,
-  materials: { kind: "sh", source: "echo hello, world" },
   isSummary: false,
   isPublish: false,
   ...overrides,
@@ -109,6 +109,35 @@ describe("<RunDetailView>", () => {
       renderDetail(stubDetail());
       const link = screen.getByRole("link", { name: /all activity/i });
       expect(link.getAttribute("href")).toBe("/");
+    });
+
+    it("shows a short git sha in the metadata row with the full sha as a title", () => {
+      const sha = "abc1234567890abcdef1234567890abcdef123456";
+      renderDetail(stubDetail({ gitSha: sha, gitDirty: false }));
+      const ref = screen.getByText("abc1234");
+      expect(ref.getAttribute("title")).toBe(sha);
+    });
+
+    it("renders a (dirty) marker when the working tree had uncommitted changes", () => {
+      renderDetail(
+        stubDetail({ gitSha: "abc1234567890abcdef1234567890abcdef123456", gitDirty: true }),
+      );
+      expect(screen.getByText(/\(dirty\)/i)).toBeDefined();
+    });
+
+    it("omits the dirty marker on a clean git ref", () => {
+      renderDetail(
+        stubDetail({ gitSha: "abc1234567890abcdef1234567890abcdef123456", gitDirty: false }),
+      );
+      expect(screen.queryByText(/\(dirty\)/i)).toBeNull();
+    });
+
+    it("omits the git ref entirely when the data dir is not a git repo", () => {
+      renderDetail(stubDetail({ gitSha: null, gitDirty: null }));
+      expect(screen.queryByText(/\(dirty\)/i)).toBeNull();
+      // The sr-only `git ref` label is only rendered alongside the sha;
+      // its absence confirms the whole segment is gone.
+      expect(screen.queryByText("git ref")).toBeNull();
     });
   });
 
@@ -316,7 +345,6 @@ describe("<RunDetailView>", () => {
             status: "running",
             traces: null,
             kind: "use",
-            materials: { kind: "use", bundle: "linter", files: {} },
           }),
         ]),
       );
@@ -342,14 +370,12 @@ describe("<RunDetailView>", () => {
             traces: null,
             kind: "use",
             isPublish: true,
-            materials: { kind: "use", bundle: "digest-bundle", files: {} },
           }),
           stubStep({
             id: "p1",
             index: 3,
             status: "ok",
             isPublish: true,
-            materials: { kind: "use", bundle: "notes-bundle", files: {} },
           }),
           stubStep({
             id: "sum",
@@ -358,7 +384,6 @@ describe("<RunDetailView>", () => {
             traces: null,
             kind: "use",
             isSummary: true,
-            materials: { kind: "use", bundle: "claude-code-summarizer", files: {} },
           }),
         ]),
       );
@@ -413,7 +438,7 @@ describe("<RunDetailView>", () => {
       expect(within(list).queryAllByRole("button")).toHaveLength(0);
     });
 
-    it("expands a row's disclosure to reveal stdout / stderr / materials once a row has run", () => {
+    it("expands a row's disclosure to reveal stdout / stderr once a row has run", () => {
       renderDetail(
         stubDetail(
           {
@@ -478,93 +503,6 @@ describe("<RunDetailView>", () => {
       fireEvent.click(screen.getByRole("button", { name: /sh: noop/i }));
       const stdoutHeading = screen.getByText(/^stdout$/i);
       expect(stdoutHeading.parentElement?.textContent).toContain("(empty)");
-    });
-
-    it("opens the materials disclosure for an sh: step", () => {
-      renderDetail(
-        stubDetail(
-          { definitionSnapshot: { name: "one-step", steps: [{ sh: "echo materials body" }] } },
-          [
-            stubStep({
-              id: "only",
-              index: 0,
-              status: "ok",
-              materials: { kind: "sh", source: "echo materials body" },
-            }),
-          ],
-        ),
-      );
-      fireEvent.click(screen.getByRole("button", { name: /sh: echo materials body/i }));
-      expect(screen.getByText(/inline shell/i)).toBeDefined();
-      expect(screen.getByText("echo materials body")).toBeDefined();
-    });
-
-    it("opens the materials disclosure for a use: bundle and lists its files", () => {
-      renderDetail(
-        stubDetail({ definitionSnapshot: { name: "one-step", steps: [{ use: "claude-code" }] } }, [
-          stubStep({
-            id: "only",
-            index: 0,
-            status: "ok",
-            kind: "use",
-            materials: {
-              kind: "use",
-              bundle: "claude-code",
-              files: { "run.sh": "#!/bin/sh", "README.md": "# bundle" },
-            },
-          }),
-        ]),
-      );
-      fireEvent.click(screen.getByRole("button", { name: /use: claude-code/i }));
-      expect(screen.getByText(/materials — bundle/i)).toBeDefined();
-      expect(screen.getByRole("button", { name: /run\.sh/i })).toBeDefined();
-      expect(screen.getByRole("button", { name: /README\.md/i })).toBeDefined();
-    });
-
-    it("expands a bundle file on click to show its source", () => {
-      renderDetail(
-        stubDetail({ definitionSnapshot: { name: "one-step", steps: [{ use: "claude-code" }] } }, [
-          stubStep({
-            id: "only",
-            index: 0,
-            status: "ok",
-            kind: "use",
-            materials: {
-              kind: "use",
-              bundle: "claude-code",
-              files: { "run.sh": "echo hi from bundle" },
-            },
-          }),
-        ]),
-      );
-      fireEvent.click(screen.getByRole("button", { name: /use: claude-code/i }));
-      expect(screen.queryByText("echo hi from bundle")).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: /run\.sh/i }));
-      expect(screen.getByText("echo hi from bundle")).toBeDefined();
-    });
-
-    it("sorts bundle files alphabetically by path", () => {
-      renderDetail(
-        stubDetail({ definitionSnapshot: { name: "one-step", steps: [{ use: "b" }] } }, [
-          stubStep({
-            id: "only",
-            index: 0,
-            status: "ok",
-            kind: "use",
-            materials: {
-              kind: "use",
-              bundle: "b",
-              files: { "z.sh": "z", "a.sh": "a", "m.sh": "m" },
-            },
-          }),
-        ]),
-      );
-      fireEvent.click(screen.getByRole("button", { name: /use: b/i }));
-      const list = screen.getByRole("button", { name: /a\.sh/i }).closest("ul");
-      const paths = within(list as HTMLElement)
-        .getAllByRole("button")
-        .map((btn) => btn.querySelector("span:last-child")?.textContent);
-      expect(paths).toEqual(["a.sh", "m.sh", "z.sh"]);
     });
 
     it("tags failed rows with data-status='failed'", () => {

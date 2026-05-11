@@ -27,12 +27,25 @@ export const runs = sqliteTable("runs", {
    * and on runs whose summariser failed.
    */
   summary: text("summary"),
+  /**
+   * HEAD commit of the data repo at run-start. Null when the data
+   * directory is not a git repo or has no commits yet. Paired with
+   * `gitDirty` so consumers can render "ran at <sha> (dirty)" and
+   * reproduce the run state with `git checkout`.
+   */
+  gitSha: text("git_sha"),
+  /**
+   * Whether the working tree had uncommitted changes at run-start.
+   * Null when `gitSha` is null (no repo to compare against).
+   */
+  gitDirty: integer("git_dirty", { mode: "boolean" }),
 });
 
 /**
- * Per-step state for a run. Carries the standard envelope (`status`,
- * `output`, `error`, `traces`, `usage`) plus a `materials` snapshot of the
- * source bytes that produced the step.
+ * Per-step state for a run. Carries the standard envelope: `status`,
+ * `output`, `error`, `traces`. Reproducibility of the source bytes
+ * that produced the step lives on `runs.gitSha` — the data repo
+ * commit at run-start — rather than per-step file snapshots.
  */
 export const runSteps = sqliteTable(
   "run_steps",
@@ -52,8 +65,6 @@ export const runSteps = sqliteTable(
     output: text("output", { mode: "json" }),
     error: text("error", { mode: "json" }),
     traces: text("traces", { mode: "json" }),
-    usage: text("usage", { mode: "json" }),
-    materials: text("materials", { mode: "json" }).notNull(),
     /**
      * Marks the row as the workflow's `summarize:` execution rather than
      * a member of the `steps:` pipeline. Set on the single summariser row
