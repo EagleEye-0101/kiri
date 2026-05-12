@@ -24,7 +24,11 @@ YAML files validated against a Zod schema. No custom DSL.
 
 ```yaml
 name: pr-review
-schedule: "*/15 * * * *"   # optional cron expression (M7)
+triggers:                  # optional, M7 — cron + file watch
+  - type: cron
+    schedule: "*/15 * * * *"
+  - type: watch
+    paths: ["~/notes/**/*.md"]
 gating: auto               # or "propose" (M8)
 steps:
   - use: fetch-pr           # script bundle: scripts/fetch-pr/run.sh
@@ -52,7 +56,7 @@ A step is one of two shapes:
 - `{ use: <name>, env?: { ... } }` — references a **script bundle** at `scripts/<name>/run.sh`. The bundle is a folder containing at minimum `run.sh` plus any sidecar files it needs (prompt files, generated settings, README documenting the bundle's env-var contract).
 - `{ sh: <string>, env?: { ... } }` — inline shell script, run via `sh -c`. Sugar for one-shots that don't deserve their own bundle. Multi-line via YAML's `|` block scalar.
 
-`env:` is a flat string-to-string map, passed verbatim to the bundle (or inline shell). Each bundle defines its own contract for what keys it expects; kiri doesn't validate config contents. Kiri's own scoped vars (`KIRI_RUN_ID`, `KIRI_STEP_INDEX`, `KIRI_REPO_ROOT`) and OS essentials (`PATH`, `HOME`, `USER`, `LOGNAME`) are applied **after** user env at spawn time, so a workflow can't override them. The `KIRI_` prefix is reserved — workflow `env:` keys starting with `KIRI_` are rejected at load time.
+`env:` is a flat string-to-string map, passed verbatim to the bundle (or inline shell). Each bundle defines its own contract for what keys it expects; kiri doesn't validate config contents. Kiri's own scoped vars (`KIRI_RUN_ID`, `KIRI_STEP_INDEX`, `KIRI_REPO_ROOT`, `KIRI_TRIGGER`, plus `KIRI_TRIGGER_FILE` and `KIRI_TRIGGER_EVENT` on watch-triggered runs) and OS essentials (`PATH`, `HOME`, `USER`, `LOGNAME`) are applied **after** user env at spawn time, so a workflow can't override them. The `KIRI_` prefix is reserved — workflow `env:` keys starting with `KIRI_` are rejected at load time.
 
 Two workflow-level sibling fields run alongside `steps:`:
 
@@ -88,12 +92,19 @@ Full I/O captured at every step. Linked from the corresponding feed entry for de
 
 ### Triggers
 
-Two only:
+Three kinds, declared on the workflow as a `triggers:` array (cron, watch) or invoked imperatively (manual):
 
-- **Cron** — in-process tick loop while the app is active.
-- **Manual** — invoked from the UI (menu, feed, todo).
+- **Cron** — `{ type: cron, schedule: <expr> }`. In-process tick loop while the app is active.
+- **Watch** — `{ type: watch, paths: [<glob>], events?, debounceMs? }`. chokidar-backed; `events` defaults to `[add, change, unlink]`; `debounceMs` defaults to 500 to coalesce editor save bursts. Runs receive `KIRI_TRIGGER_FILE` (absolute path) and `KIRI_TRIGGER_EVENT` so the step can read what changed.
+- **Manual** — invoked from the UI (menu, feed, todo). No declaration needed.
 
-No file watches, webhooks, or inbox polling. Polling-via-cron-workflow handles everything that shape.
+Every step receives `KIRI_TRIGGER` (`cron` | `watch` | `manual`) so bundles can branch on origin.
+
+**Coalescing.** Each workflow has at most one in-flight + one pending run. The pending slot is last-event-wins — a queued cron tick or file event is overwritten by a newer one, not stacked. A burst of 50 file changes during a long-running run lands as one follow-up run carrying the most recent event. The global cap of 1 in-flight run across all workflows is unchanged; per-workflow pending slots wait on the global slot.
+
+**Missed events.** While paused or app-down, events are dropped, not replayed. Matches the "while the app is active" invariant.
+
+No webhooks or inbox polling — polling-via-cron-workflow handles those shapes.
 
 ### State storage
 
@@ -260,7 +271,7 @@ Script execution is the central capability of this system, which means security 
 
 - **No shell interpolation of inputs.** Workflow inputs are passed via env vars or argv arrays, never spliced into shell command strings. The orchestrator constructs argument lists, the OS handles them, no shell parsing of user-controlled strings.
 - **Per-step working directory.** Each workflow run gets a scratch directory; the step's cwd is set there, not the user's home or the orchestrator repo.
-- **Per-step env scope.** Steps only see env vars from the step's `env:` block plus a small kiri-controlled set (`KIRI_RUN_ID`, `KIRI_STEP_INDEX`, `KIRI_REPO_ROOT`) and the OS essentials (`PATH`, `HOME`, `USER`, `LOGNAME`). No other parent-process env leaks through.
+- **Per-step env scope.** Steps only see env vars from the step's `env:` block plus a small kiri-controlled set (`KIRI_RUN_ID`, `KIRI_STEP_INDEX`, `KIRI_REPO_ROOT`, `KIRI_TRIGGER`, plus `KIRI_TRIGGER_FILE` / `KIRI_TRIGGER_EVENT` on watch-triggered runs) and the OS essentials (`PATH`, `HOME`, `USER`, `LOGNAME`). No other parent-process env leaks through.
 - **Env precedence at spawn.** User-declared `env:` is applied first; kiri- and OS-controlled vars overwrite on key collision. A workflow can't redirect `PATH` to inject a malicious binary or shadow `KIRI_RUN_ID` to confuse run identity.
 - **Reserved namespace.** `env:` keys starting with `KIRI_` are rejected at workflow load time as a schema error. Typos and accidental collisions surface as load failures, not silent overwrites at spawn.
 - **Resource limits.** ulimits on CPU time, memory, file descriptors, and disk writes. A runaway script halts cleanly rather than degrading the system.
@@ -292,7 +303,7 @@ Non-goals to resist scope creep:
 
 - Branching, conditionals, fan-out/fan-in
 - Auto-retry, DLQ
-- File watches, webhooks, inbox polling
+- Webhooks, inbox polling
 - Multi-user, auth, sharing
 - Tool-granular propose-to-approve (workflow-level only)
 - Dynamic per-call permission policy (static per step only)
@@ -320,7 +331,7 @@ Sequenced for fastest path to dogfooding, then layering capability outward. Each
 
 **Next up (M7 onwards):**
 
-13. **Cron triggers** (M7). In-process tick loop, `schedule:` field on workflows, global concurrency cap.
+13. **Triggers** (M7). `triggers:` block on workflows: `cron` (in-process tick loop) and `watch` (chokidar globs). Per-workflow depth-1 pending slot plus global cap of 1 in-flight. Watch-triggered runs get `KIRI_TRIGGER_FILE` / `KIRI_TRIGGER_EVENT`; every run gets `KIRI_TRIGGER`.
 14. **Todos + gating** (M8). `gating:` field, dedup keys, propose vs auto, right-rail UI.
 15. **Generic step meta** (M9). Deferred. The original design used a `KIRI_META_FILE` file channel for steps to emit cost/tokens/model; that wiring was retired without ever being read back. Re-introducing this needs both a transport and the UI promotion to feed-entry headers.
 16. **Polish** (M10). Feed filtering and scoping, global pause control with kill-in-flight modifier.

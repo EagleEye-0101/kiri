@@ -7,7 +7,7 @@ Companion to `design-notes.md`. M0–M6 are shipped — see `git log` for the hi
 These are constraints, not work items. They hold for every milestone below.
 
 - Standard step envelope (`status`, `output`, `error`, `traces`, `meta`) — established in M0, never deferred
-- Workflow YAML validated against a Zod schema; the top-level shape is fixed (`steps`, `summarize`, `publish`, `schedule`, `gating`) but step `env:` contents are bundle-defined and not validated by kiri
+- Workflow YAML validated against a Zod schema; the top-level shape is fixed (`steps`, `summarize`, `publish`, `triggers`, `gating`) but step `env:` contents are bundle-defined and not validated by kiri
 - No shell interpolation of inputs anywhere — argv arrays and env vars only
 - Kiri is a CLI launched per-repo; workflow definitions live in `<cwd>/workflows/` of whichever repo Kiri is running against. No global cross-repo store
 - Repo-scoped runtime state lives in `<cwd>/.kiri/` (gitignored)
@@ -17,16 +17,17 @@ These are constraints, not work items. They hold for every milestone below.
 - Per-step env scope; user `env:` applied first, kiri- and OS-controlled vars overwrite on collision; `KIRI_` prefix reserved
 - Step output rendered as plain text in the UI. Markdown rendering is reserved for surfaces with explicit content semantics — `publish:` artefacts (M6) and `summarize:` summaries — routed through the same sandboxed renderer. Raw step stdout/stderr stays plain text.
 
-## M7 — Cron
+## M7 — Triggers
 
-Workflows are manually triggered until this lands.
+Workflows are manually triggered until this lands. M7 introduces a declarative `triggers:` block supporting two kinds — cron and file-watch — both feeding the same executor path as manual runs.
 
-- In-process tick loop, runs while Hono is up
-- `schedule:` field (cron expression) on workflow definitions
-- Schedule registry rebuilt on workflow def reload
-- Global concurrency cap: 1 in-flight run by default
-- Scheduled runs flow through the same executor path as manual runs
-- Missed runs while paused or app-down are dropped, not queued (matches app-active scope)
+- `triggers:` array on workflow definitions; entries are `{ type: "cron", schedule }` or `{ type: "watch", paths, events?, debounceMs? }`. `paths` is a list of globs (chokidar semantics); `events` defaults to `["add", "change", "unlink"]`; `debounceMs` defaults to 500
+- In-process tick loop drives cron; chokidar drives file watches; both run while Hono is up
+- Trigger registry rebuilt on workflow def reload — cron schedules re-registered, file watcher subscriptions torn down and re-bound
+- Per-workflow concurrency: at most one in-flight + one pending run; the pending slot is last-event-wins (a queued cron tick or file event is overwritten by a newer one, not stacked)
+- Global concurrency cap stays at 1 in-flight run across all workflows
+- Missed events while paused or app-down are dropped, not queued (matches app-active scope)
+- Every step receives `KIRI_TRIGGER` (`"cron"` | `"watch"` | `"manual"`). Watch-triggered runs additionally receive `KIRI_TRIGGER_FILE` (absolute path of the file that fired the run) and `KIRI_TRIGGER_EVENT` (`"add"` | `"change"` | `"unlink"`). Reserved-namespace rules apply — workflow `env:` keys can't shadow them.
 
 ## M8 — Todos + gating
 
@@ -57,7 +58,7 @@ Capability:
 
 - Branching, conditionals, fan-out/fan-in
 - Auto-retry, DLQ
-- File watches, webhooks, inbox polling (use polling-via-cron-workflow instead)
+- Webhooks, inbox polling (use polling-via-cron-workflow instead)
 - Multi-user, auth, sharing
 - Tool-granular gating (workflow-level only)
 - Dynamic per-call permission policy (static per step only)
