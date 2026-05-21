@@ -55,6 +55,21 @@ Once the plan is signed off:
 
 If during implementation you discover the plan is wrong, **stop and revise the plan**. Don't quietly drift away from what was agreed.
 
+## Keeping documentation in sync
+
+When completing a ticket, before considering it done, sweep the project's documentation surfaces and correct anything the change has made wrong, incomplete, or misleading. Documentation lives in more places than the repo's markdown files — explicitly consider each of these surfaces:
+
+- **CLI help and usage text** — what the binary prints for `--help` and usage errors.
+- **The public site deployed to Cloudflare** — the hosted shell and docs pages users browse to.
+- **Repo markdown docs** — the project README, the contributor guide, the architecture/design notes, and the milestone/roadmap docs.
+- **The workflow-authoring reference for AI assistants** — the standalone guide that teaches an assistant to author workflows for this project.
+- **Bundle and script READMEs** — the env-var contract docs shipped alongside each bundle.
+- **Anything `kiri init` scaffolds** — the README, example workflow and prompt written into a fresh user repo, plus the generated workflow JSON Schema.
+- **Schema descriptions** — the descriptions on the workflow Zod schema, which surface as editor autocomplete and validation hints.
+- **In-app UI copy** — documentation links, empty-state explanations, and onboarding or explanatory text rendered inside the app.
+
+Not every change touches every surface, but check each one rather than assuming. Stale documentation is a defect — treat keeping it correct as part of the work, not an afterthought.
+
 ## House rules
 
 - **KISS.** Small functions, simple modules, clear intent. The boring solution is almost always the right one.
