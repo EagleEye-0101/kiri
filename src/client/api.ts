@@ -1,7 +1,14 @@
+/**
+ * One value in a step / publish / summariser `env:` map. Either a literal
+ * string or a structured reference to a declared workflow input. The
+ * runner resolves refs against the run's `inputs` snapshot at spawn time.
+ */
+export type EnvValue = string | { input: string };
+
 /** A single workflow step as seen by the client. */
 export type WorkflowStepSummary =
-  | { use: string; description?: string; env?: Record<string, string> }
-  | { sh: string; description?: string; env?: Record<string, string> };
+  | { use: string; description?: string; env?: Record<string, EnvValue> }
+  | { sh: string; description?: string; env?: Record<string, EnvValue> };
 
 /**
  * One `publish:` entry on a workflow summary. `title` is always present —
@@ -9,18 +16,40 @@ export type WorkflowStepSummary =
  * re-implement it.
  */
 export type WorkflowPublishSummary =
-  | { name: string; title: string; description?: string; use: string; env?: Record<string, string> }
+  | {
+      name: string;
+      title: string;
+      description?: string;
+      use: string;
+      env?: Record<string, EnvValue>;
+    }
   | {
       name: string;
       title: string;
       description?: string;
       sh: string;
-      env?: Record<string, string>;
+      env?: Record<string, EnvValue>;
     };
+
+/**
+ * One declared input on a workflow summary. Mirrors the YAML schema:
+ * `name` is the identifier referenced from a step's `env:` via
+ * `{ input: <name> }`; `description` (when present) renders as help text
+ * next to the field; `required` gates submit; `default` pre-fills the
+ * modal field at open time.
+ */
+export interface WorkflowInputSummary {
+  name: string;
+  description?: string;
+  required?: boolean;
+  default?: string;
+}
 
 /** Workflow summary as returned by `GET /api/workflows`. */
 export interface WorkflowSummary {
   name: string;
+  /** Defined when the workflow declares an `inputs:` block; absent otherwise. */
+  inputs?: WorkflowInputSummary[];
   steps: WorkflowStepSummary[];
   gating?: "auto" | "propose";
   /** Defined when the workflow has at least one `publish:` entry. */
@@ -50,14 +79,14 @@ export type RunPublishSnapshot =
       title?: string;
       description?: string;
       use: string;
-      env?: Record<string, string>;
+      env?: Record<string, EnvValue>;
     }
   | {
       name: string;
       title?: string;
       description?: string;
       sh: string;
-      env?: Record<string, string>;
+      env?: Record<string, EnvValue>;
     };
 
 /**
@@ -282,12 +311,24 @@ export const fetchRecentArticles = async (): Promise<RecentArticle[]> =>
 /**
  * Trigger a manual run for the named workflow. Resolves the moment the run
  * row is inserted server-side — the returned `status` is `"running"`, and
- * terminal transitions arrive on the SSE event stream. Throws on non-2xx.
+ * terminal transitions arrive on the SSE event stream. Pass `inputs` to
+ * supply values for a workflow declaring an `inputs:` block; the modal
+ * collects them and forwards the map verbatim. Omit for workflows without
+ * declared inputs. Throws on non-2xx.
  */
-export const triggerRun = async (name: string): Promise<RunStartResult> =>
-  json<RunStartResult>(
-    await apiFetch(`/api/workflows/${encodeURIComponent(name)}/runs`, { method: "POST" }),
+export const triggerRun = async (
+  name: string,
+  inputs?: Record<string, string>,
+): Promise<RunStartResult> => {
+  const init: RequestInit = { method: "POST" };
+  if (inputs !== undefined) {
+    init.body = JSON.stringify({ inputs });
+    init.headers = { "Content-Type": "application/json" };
+  }
+  return json<RunStartResult>(
+    await apiFetch(`/api/workflows/${encodeURIComponent(name)}/runs`, init),
   );
+};
 
 /**
  * Request cancellation of an in-flight run. Resolves on 202 — the server
