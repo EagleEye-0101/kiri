@@ -1,9 +1,11 @@
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { zValidator } from "@hono/zod-validator";
 import { and, asc, desc, eq, inArray, lt, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { cors } from "hono/cors";
+import { createMiddleware } from "hono/factory";
 import { z } from "zod";
 import { resolvePublishTitle } from "../shared/publish-title.ts";
 import type { KiriDb } from "./db/index.ts";
@@ -134,6 +136,36 @@ const runListQuerySchema = z.object({
 // payload) live in `validateInputs` since they need the workflow definition.
 const invokeBodySchema = z.object({ inputs: z.record(z.string(), z.string()).optional() }).strict();
 
+declare module "hono" {
+  interface ContextVariableMap {
+    invokeBody: z.infer<typeof invokeBodySchema>;
+  }
+}
+
+/**
+ * Parse and validate an optional JSON request body against `invokeBodySchema`.
+ * Empty body resolves to `{}`; malformed JSON returns 400; shape mismatch
+ * returns 400 with the first Zod issue. On success the validated value is
+ * exposed to the route handler via `c.get("invokeBody")`.
+ */
+const optionalInvokeBody = createMiddleware(async (c, next) => {
+  const raw = await c.req.text();
+  let parsed: unknown = {};
+  if (raw.length > 0) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+  }
+  const result = invokeBodySchema.safeParse(parsed);
+  if (!result.success) {
+    return c.json({ error: result.error.issues[0]?.message ?? "invalid body" }, 400);
+  }
+  c.set("invokeBody", result.data);
+  return next();
+});
+
 const NO_STORE_PATHS = new Set(["/", "/index.html", "/app.js", "/app.css"]);
 
 const ALLOWED_ORIGINS = [
@@ -199,29 +231,12 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get("/api/workflows", (c) => c.json(registry.listWorkflows().map(summarizeWorkflow)));
 
-  app.post("/api/workflows/:name/runs", async (c) => {
+  app.post("/api/workflows/:name/runs", optionalInvokeBody, async (c) => {
     const name = c.req.param("name");
     const wf = registry.getWorkflow(name);
     if (!wf) return c.json({ error: `workflow "${name}" not found` }, 404);
 
-    // Body is optional — a workflow with no inputs invokes with no body, same
-    // as before. Empty body == `{}`; anything non-empty must parse as JSON
-    // matching `invokeBodySchema`. The workflow-aware checks then run against
-    // the resolved payload.
-    const raw = await c.req.text();
-    let parsedBody: unknown = {};
-    if (raw.length > 0) {
-      try {
-        parsedBody = JSON.parse(raw);
-      } catch {
-        return c.json({ error: "invalid JSON body" }, 400);
-      }
-    }
-    const shape = invokeBodySchema.safeParse(parsedBody);
-    if (!shape.success) {
-      return c.json({ error: shape.error.issues[0]?.message ?? "invalid body" }, 400);
-    }
-    const inputs = shape.data.inputs ?? {};
+    const { inputs = {} } = c.get("invokeBody");
     const check = validateInputs(wf, inputs);
     if (!check.ok) return c.json({ error: check.error }, 400);
 
@@ -282,7 +297,7 @@ export function createApp(deps: AppDeps): Hono {
     return c.body(null, 204);
   });
 
-  app.post("/api/runs/:id/rerun", async (c) => {
+  app.post("/api/runs/:id/rerun", optionalInvokeBody, async (c) => {
     const id = c.req.param("id");
     const run = db.select().from(runs).where(eq(runs.id, id)).get();
     if (!run) return c.json({ error: `run "${id}" not found` }, 404);
@@ -297,23 +312,7 @@ export function createApp(deps: AppDeps): Hono {
       );
     }
 
-    // Same optional-body contract as `POST /api/workflows/:name/runs`: empty
-    // body preserves today's no-inputs path; a JSON object is validated
-    // against the *current* workflow (the same one the rerun will execute).
-    const raw = await c.req.text();
-    let parsedBody: unknown = {};
-    if (raw.length > 0) {
-      try {
-        parsedBody = JSON.parse(raw);
-      } catch {
-        return c.json({ error: "invalid JSON body" }, 400);
-      }
-    }
-    const shape = invokeBodySchema.safeParse(parsedBody);
-    if (!shape.success) {
-      return c.json({ error: shape.error.issues[0]?.message ?? "invalid body" }, 400);
-    }
-    const inputs = shape.data.inputs ?? {};
+    const { inputs = {} } = c.get("invokeBody");
     const check = validateInputs(wf, inputs);
     if (!check.ok) return c.json({ error: check.error }, 400);
 
@@ -340,113 +339,121 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ runId: id, status: "running" }, 202);
   });
 
-  app.get("/api/runs", (c) => {
-    const parsed = runListQuerySchema.safeParse({
-      cursor: c.req.query("cursor"),
-      limit: c.req.query("limit"),
-    });
-    if (!parsed.success) {
-      return c.json({ error: parsed.error.issues[0]?.message ?? "invalid query" }, 400);
-    }
-    const { cursor, limit } = parsed.data;
-
-    // Keyset pagination on the compound key (started_at DESC, id DESC). The
-    // cursor is the last seen run's id; we look it up to resolve its
-    // started_at and then page strictly after that point.
-    let anchor: { startedAt: Date; id: string } | undefined;
-    if (cursor !== undefined) {
-      const found = db
-        .select({ startedAt: runs.startedAt, id: runs.id })
-        .from(runs)
-        .where(eq(runs.id, cursor))
-        .get();
-      if (!found) return c.json({ error: `cursor "${cursor}" not found` }, 400);
-      anchor = found;
-    }
-
-    const rows = db
-      .select()
-      .from(runs)
-      .where(
-        anchor
-          ? or(
-              lt(runs.startedAt, anchor.startedAt),
-              and(eq(runs.startedAt, anchor.startedAt), lt(runs.id, anchor.id)),
-            )
-          : undefined,
-      )
-      .orderBy(desc(runs.startedAt), desc(runs.id))
-      .limit(limit)
-      .all();
-
-    const nextCursor = rows.length === limit ? (rows[rows.length - 1]?.id ?? null) : null;
-
-    // Single aggregation across the page rather than per-row N+1. Empty page
-    // skips the query entirely so the common no-articles feed pays nothing.
-    type ArticleProjection = { name: string; title: string; createdAt: Date };
-    const articlesByRunId = new Map<string, ArticleProjection[]>();
-    if (rows.length > 0) {
-      const allArticles = db
-        .select({
-          runId: articles.runId,
-          name: articles.name,
-          title: articles.title,
-          createdAt: articles.createdAt,
-        })
-        .from(articles)
-        .where(
-          inArray(
-            articles.runId,
-            rows.map((r) => r.id),
-          ),
-        )
-        .orderBy(asc(articles.createdAt))
-        .all();
-      for (const { runId, name, title, createdAt } of allArticles) {
-        const list = articlesByRunId.get(runId);
-        const entry: ArticleProjection = { name, title, createdAt };
-        if (list) list.push(entry);
-        else articlesByRunId.set(runId, [entry]);
+  app.get(
+    "/api/runs",
+    zValidator("query", runListQuerySchema, (result, c) => {
+      if (!result.success) {
+        return c.json({ error: result.error.issues[0]?.message ?? "invalid query" }, 400);
       }
-    }
+    }),
+    (c) => {
+      const { cursor, limit } = c.req.valid("query");
 
-    return c.json({
-      runs: rows.map((row) => ({
-        ...row,
-        isInterrupted: !registry.getWorkflow(row.workflowName),
-        articles: articlesByRunId.get(row.id) ?? [],
-      })),
-      nextCursor,
-    });
-  });
+      // Keyset pagination on the compound key (started_at DESC, id DESC). The
+      // cursor is the last seen run's id; we look it up to resolve its
+      // started_at and then page strictly after that point.
+      let anchor: { startedAt: Date; id: string } | undefined;
+      if (cursor !== undefined) {
+        const found = db
+          .select({ startedAt: runs.startedAt, id: runs.id })
+          .from(runs)
+          .where(eq(runs.id, cursor))
+          .get();
+        if (!found) return c.json({ error: `cursor "${cursor}" not found` }, 400);
+        anchor = found;
+      }
 
-  app.get("/api/runs/:id/published/:name", (c) => {
-    const id = c.req.param("id");
-    const name = c.req.param("name");
-    const parsedName = publishNameSchema.safeParse(name);
-    if (!parsedName.success) {
-      return c.json({ error: parsedName.error.issues[0]?.message ?? "invalid article name" }, 400);
-    }
-    const run = db.select().from(runs).where(eq(runs.id, id)).get();
-    if (!run) return c.json({ error: `run "${id}" not found` }, 404);
-    const article = db
-      .select()
-      .from(articles)
-      .where(and(eq(articles.runId, id), eq(articles.name, name)))
-      .get();
-    if (!article) {
-      return c.json({ error: `article "${name}" not found on run "${id}"` }, 404);
-    }
-    return c.json({
-      id: article.id,
-      runId: article.runId,
-      name: article.name,
-      title: article.title,
-      contentMd: article.contentMd,
-      createdAt: article.createdAt,
-      workflowName: run.workflowName,
-    });
-  });
+      const rows = db
+        .select()
+        .from(runs)
+        .where(
+          anchor
+            ? or(
+                lt(runs.startedAt, anchor.startedAt),
+                and(eq(runs.startedAt, anchor.startedAt), lt(runs.id, anchor.id)),
+              )
+            : undefined,
+        )
+        .orderBy(desc(runs.startedAt), desc(runs.id))
+        .limit(limit)
+        .all();
+
+      const nextCursor = rows.length === limit ? (rows[rows.length - 1]?.id ?? null) : null;
+
+      // Single aggregation across the page rather than per-row N+1. Empty page
+      // skips the query entirely so the common no-articles feed pays nothing.
+      type ArticleProjection = { name: string; title: string; createdAt: Date };
+      const articlesByRunId = new Map<string, ArticleProjection[]>();
+      if (rows.length > 0) {
+        const allArticles = db
+          .select({
+            runId: articles.runId,
+            name: articles.name,
+            title: articles.title,
+            createdAt: articles.createdAt,
+          })
+          .from(articles)
+          .where(
+            inArray(
+              articles.runId,
+              rows.map((r) => r.id),
+            ),
+          )
+          .orderBy(asc(articles.createdAt))
+          .all();
+        for (const { runId, name, title, createdAt } of allArticles) {
+          const list = articlesByRunId.get(runId);
+          const entry: ArticleProjection = { name, title, createdAt };
+          if (list) list.push(entry);
+          else articlesByRunId.set(runId, [entry]);
+        }
+      }
+
+      return c.json({
+        runs: rows.map((row) => ({
+          ...row,
+          isInterrupted: !registry.getWorkflow(row.workflowName),
+          articles: articlesByRunId.get(row.id) ?? [],
+        })),
+        nextCursor,
+      });
+    },
+  );
+
+  app.get(
+    "/api/runs/:id/published/:name",
+    zValidator(
+      "param",
+      z.object({ id: z.string().min(1), name: publishNameSchema }),
+      (result, c) => {
+        if (!result.success) {
+          return c.json({ error: result.error.issues[0]?.message ?? "invalid article name" }, 400);
+        }
+      },
+    ),
+    (c) => {
+      const { id, name } = c.req.valid("param");
+      const run = db.select().from(runs).where(eq(runs.id, id)).get();
+      if (!run) return c.json({ error: `run "${id}" not found` }, 404);
+      const article = db
+        .select()
+        .from(articles)
+        .where(and(eq(articles.runId, id), eq(articles.name, name)))
+        .get();
+      if (!article) {
+        return c.json({ error: `article "${name}" not found on run "${id}"` }, 404);
+      }
+      return c.json({
+        id: article.id,
+        runId: article.runId,
+        name: article.name,
+        title: article.title,
+        contentMd: article.contentMd,
+        createdAt: article.createdAt,
+        workflowName: run.workflowName,
+      });
+    },
+  );
 
   app.get("/api/articles/recent", (c) => {
     // Cross-run shortlist for the right-rail "Recently Published" section.
