@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 /**
  * One value in a step / publish / summariser `env:` map. Either a literal
  * string or a structured reference to a declared workflow input. The
@@ -205,11 +207,14 @@ export class ApiError extends Error {
   }
 }
 
+const assertOk = async (res: Response): Promise<void> => {
+  if (res.ok) return;
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  throw new ApiError(body.error ?? `${res.status} ${res.statusText}`, res.status);
+};
+
 const json = async <T>(res: Response): Promise<T> => {
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new ApiError(body.error ?? `${res.status} ${res.statusText}`, res.status);
-  }
+  await assertOk(res);
   return (await res.json()) as T;
 };
 
@@ -360,11 +365,7 @@ export const cancelRun = async (id: string): Promise<{ runId: string }> =>
  * 409 if it's still in flight (caller must cancel first).
  */
 export const deleteRun = async (id: string): Promise<void> => {
-  const res = await apiFetch(`/api/runs/${encodeURIComponent(id)}`, { method: "DELETE" });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new ApiError(body.error ?? `${res.status} ${res.statusText}`, res.status);
-  }
+  await assertOk(await apiFetch(`/api/runs/${encodeURIComponent(id)}`, { method: "DELETE" }));
 };
 
 /**
@@ -416,6 +417,11 @@ export interface LatestRelease {
 
 const LATEST_RELEASE_URL = "https://api.github.com/repos/LeeCheneler/kiri/releases/latest";
 
+const releaseSchema = z.object({
+  tag_name: z.string(),
+  html_url: z.string(),
+});
+
 /**
  * Fetch the latest published release from kiri's GitHub repo. Calls the
  * GitHub REST API directly from the browser (CORS-friendly, no token
@@ -430,9 +436,9 @@ export const fetchLatestRelease = async (): Promise<LatestRelease> => {
   if (!res.ok) {
     throw new ApiError(`${res.status} ${res.statusText}`, res.status);
   }
-  const body = (await res.json()) as { tag_name?: unknown; html_url?: unknown };
-  if (typeof body.tag_name !== "string" || typeof body.html_url !== "string") {
+  const parsed = releaseSchema.safeParse(await res.json());
+  if (!parsed.success) {
     throw new ApiError("malformed latest-release payload", 502);
   }
-  return { tagName: body.tag_name, htmlUrl: body.html_url };
+  return { tagName: parsed.data.tag_name, htmlUrl: parsed.data.html_url };
 };
