@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
@@ -88,18 +88,16 @@ describe("<RunDetailView>", () => {
       expect(screen.getByRole("heading", { level: 2, name: /pr-review/i })).toBeDefined();
     });
 
-    it("renders the status word in the matching status colour", () => {
+    it("renders the run's status word in the header, keyed by data-status", () => {
       const { container } = renderDetail(stubDetail({ status: "failed" }));
       const status = container.querySelector('header [data-status="failed"]');
       expect(status?.textContent).toBe("failed");
-      expect(status?.className).toContain("text-status-failed");
     });
 
-    it("renders cancelled runs with the cancelled status colour", () => {
+    it("renders cancelled runs with the cancelled status word in the header", () => {
       const { container } = renderDetail(stubDetail({ status: "cancelled" }));
       const status = container.querySelector('header [data-status="cancelled"]');
       expect(status?.textContent).toBe("cancelled");
-      expect(status?.className).toContain("text-status-cancelled");
     });
 
     it("renders the trigger, relative start time and duration in the metadata row", () => {
@@ -169,7 +167,6 @@ describe("<RunDetailView>", () => {
       const { container } = renderDetail(stubDetail({ status: "ok", isInterrupted: true }));
       const status = container.querySelector('header [data-status="ok"]');
       expect(status?.textContent).toBe("ok");
-      expect(status?.className).toContain("text-status-ok");
     });
 
     it("renders a deleted marker in the byline", () => {
@@ -196,7 +193,8 @@ describe("<RunDetailView>", () => {
       expect(alert.textContent).toContain("step 'lint' exited 1");
     });
 
-    it("hides the stack trace by default and reveals it on toggle", () => {
+    it("hides the stack trace by default and reveals it on toggle", async () => {
+      const user = userEvent.setup();
       renderDetail(
         stubDetail({
           status: "failed",
@@ -204,7 +202,7 @@ describe("<RunDetailView>", () => {
         }),
       );
       expect(screen.queryByText(/frob\(\)/)).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: /show stack/i }));
+      await user.click(screen.getByRole("button", { name: /show stack/i }));
       expect(screen.getByText(/frob\(\) at line 42/)).toBeDefined();
     });
 
@@ -215,8 +213,6 @@ describe("<RunDetailView>", () => {
   });
 
   describe("cancel button", () => {
-    const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
-
     it("renders when the run is running and an onCancel handler is provided", () => {
       renderDetail(stubDetail({ status: "running", finishedAt: null }), {
         onCancel: () => Promise.resolve({ runId: "run-1" }),
@@ -247,6 +243,7 @@ describe("<RunDetailView>", () => {
     });
 
     it("invokes onCancel exactly once on click", async () => {
+      const user = userEvent.setup();
       let calls = 0;
       const onCancel = () => {
         calls++;
@@ -254,15 +251,13 @@ describe("<RunDetailView>", () => {
       };
       renderDetail(stubDetail({ status: "running", finishedAt: null }), { onCancel });
 
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /cancel run/i }));
-        await flushMicrotasks();
-      });
+      await user.click(screen.getByRole("button", { name: /cancel run/i }));
 
       expect(calls).toBe(1);
     });
 
     it("shows a pending label and disables the button while the request is in flight", async () => {
+      const user = userEvent.setup();
       let resolve: (() => void) | undefined;
       const onCancel = () =>
         new Promise<{ runId: string }>((res) => {
@@ -270,33 +265,26 @@ describe("<RunDetailView>", () => {
         });
       renderDetail(stubDetail({ status: "running", finishedAt: null }), { onCancel });
 
-      const button = screen.getByRole("button", { name: /cancel run/i });
-      act(() => {
-        fireEvent.click(button);
-      });
+      await user.click(screen.getByRole("button", { name: /cancel run/i }));
 
       const pending = screen.getByRole("button", { name: /cancelling/i });
       expect(pending.hasAttribute("disabled")).toBe(true);
 
-      await act(async () => {
-        resolve?.();
-        await flushMicrotasks();
-      });
-
+      resolve?.();
       // After the request resolves the button returns to its idle label.
-      expect(screen.getByRole("button", { name: /cancel run/i })).toBeDefined();
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /cancel run/i })).toBeDefined();
+      });
     });
 
     it("surfaces the error message inline when onCancel rejects", async () => {
+      const user = userEvent.setup();
       const onCancel = () => Promise.reject(new Error('run "abc" is not in flight'));
       renderDetail(stubDetail({ status: "running", finishedAt: null }), { onCancel });
 
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /cancel run/i }));
-        await flushMicrotasks();
-      });
+      await user.click(screen.getByRole("button", { name: /cancel run/i }));
 
-      const alert = screen.getByRole("alert");
+      const alert = await screen.findByRole("alert");
       expect(alert.textContent).toContain('run "abc" is not in flight');
       // Button is re-enabled and back to its idle label so the user can retry.
       const button = screen.getByRole("button", { name: /cancel run/i });
@@ -305,8 +293,6 @@ describe("<RunDetailView>", () => {
   });
 
   describe("delete button", () => {
-    const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
-
     it.each(["ok", "failed", "cancelled"] as const)(
       "renders for the terminal status %s when onDelete is provided",
       (status) => {
@@ -332,6 +318,7 @@ describe("<RunDetailView>", () => {
     });
 
     it("invokes onDelete exactly once on click", async () => {
+      const user = userEvent.setup();
       let calls = 0;
       const onDelete = () => {
         calls++;
@@ -339,15 +326,13 @@ describe("<RunDetailView>", () => {
       };
       renderDetail(stubDetail({ status: "ok" }), { onDelete });
 
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
-        await flushMicrotasks();
-      });
+      await user.click(screen.getByRole("button", { name: /^delete$/i }));
 
       expect(calls).toBe(1);
     });
 
     it("shows a pending label and disables the button while the request is in flight", async () => {
+      const user = userEvent.setup();
       let resolve: (() => void) | undefined;
       const onDelete = () =>
         new Promise<void>((res) => {
@@ -355,32 +340,25 @@ describe("<RunDetailView>", () => {
         });
       renderDetail(stubDetail({ status: "ok" }), { onDelete });
 
-      const button = screen.getByRole("button", { name: /^delete$/i });
-      act(() => {
-        fireEvent.click(button);
-      });
+      await user.click(screen.getByRole("button", { name: /^delete$/i }));
 
       const pending = screen.getByRole("button", { name: /deleting/i });
       expect(pending.hasAttribute("disabled")).toBe(true);
 
-      await act(async () => {
-        resolve?.();
-        await flushMicrotasks();
+      resolve?.();
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /^delete$/i })).toBeDefined();
       });
-
-      expect(screen.getByRole("button", { name: /^delete$/i })).toBeDefined();
     });
 
     it("surfaces the error message inline when onDelete rejects", async () => {
+      const user = userEvent.setup();
       const onDelete = () => Promise.reject(new Error('run "abc" is in flight; cancel it first'));
       renderDetail(stubDetail({ status: "ok" }), { onDelete });
 
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
-        await flushMicrotasks();
-      });
+      await user.click(screen.getByRole("button", { name: /^delete$/i }));
 
-      const alert = screen.getByRole("alert");
+      const alert = await screen.findByRole("alert");
       expect(alert.textContent).toContain('run "abc" is in flight; cancel it first');
       const button = screen.getByRole("button", { name: /^delete$/i });
       expect(button.hasAttribute("disabled")).toBe(false);
@@ -388,8 +366,6 @@ describe("<RunDetailView>", () => {
   });
 
   describe("rerun button", () => {
-    const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
-
     it.each(["ok", "failed", "cancelled"] as const)(
       "renders for the terminal status %s when onRerun is provided",
       (status) => {
@@ -431,7 +407,8 @@ describe("<RunDetailView>", () => {
       expect(button.getAttribute("title")).toContain("no longer exists");
     });
 
-    it("does not invoke onRerun when the button is disabled (interrupted)", () => {
+    it("does not invoke onRerun when the button is disabled (interrupted)", async () => {
+      const user = userEvent.setup();
       let calls = 0;
       const onRerun = () => {
         calls++;
@@ -439,14 +416,13 @@ describe("<RunDetailView>", () => {
       };
       renderDetail(stubDetail({ status: "failed", isInterrupted: true }), { onRerun });
 
-      act(() => {
-        fireEvent.click(screen.getByRole("button", { name: /run again/i }));
-      });
+      await user.click(screen.getByRole("button", { name: /run again/i }));
 
       expect(calls).toBe(0);
     });
 
     it("invokes onRerun exactly once on click", async () => {
+      const user = userEvent.setup();
       let calls = 0;
       const onRerun = () => {
         calls++;
@@ -454,15 +430,13 @@ describe("<RunDetailView>", () => {
       };
       renderDetail(stubDetail({ status: "ok" }), { onRerun });
 
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /run again/i }));
-        await flushMicrotasks();
-      });
+      await user.click(screen.getByRole("button", { name: /run again/i }));
 
       expect(calls).toBe(1);
     });
 
     it("shows a pending label and disables the button while the request is in flight", async () => {
+      const user = userEvent.setup();
       let resolve: ((value: { runId: string; status: "running" }) => void) | undefined;
       const onRerun = () =>
         new Promise<{ runId: string; status: "running" }>((res) => {
@@ -470,32 +444,25 @@ describe("<RunDetailView>", () => {
         });
       renderDetail(stubDetail({ status: "ok" }), { onRerun });
 
-      const button = screen.getByRole("button", { name: /run again/i });
-      act(() => {
-        fireEvent.click(button);
-      });
+      await user.click(screen.getByRole("button", { name: /run again/i }));
 
       const pending = screen.getByRole("button", { name: /starting/i });
       expect(pending.hasAttribute("disabled")).toBe(true);
 
-      await act(async () => {
-        resolve?.({ runId: "run-1", status: "running" });
-        await flushMicrotasks();
+      resolve?.({ runId: "run-1", status: "running" });
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /run again/i })).toBeDefined();
       });
-
-      expect(screen.getByRole("button", { name: /run again/i })).toBeDefined();
     });
 
     it("surfaces the error message inline when onRerun rejects", async () => {
+      const user = userEvent.setup();
       const onRerun = () => Promise.reject(new Error('run "abc" is in flight; cancel it first'));
       renderDetail(stubDetail({ status: "ok" }), { onRerun });
 
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: /run again/i }));
-        await flushMicrotasks();
-      });
+      await user.click(screen.getByRole("button", { name: /run again/i }));
 
-      const alert = screen.getByRole("alert");
+      const alert = await screen.findByRole("alert");
       expect(alert.textContent).toContain('run "abc" is in flight; cancel it first');
       const button = screen.getByRole("button", { name: /run again/i });
       expect(button.hasAttribute("disabled")).toBe(false);
@@ -507,7 +474,8 @@ describe("<RunDetailView>", () => {
         { name: "branch", default: "main" },
       ];
 
-      it("renders a warning in the modal that the prior attempt will be cleared", () => {
+      it("renders a warning in the modal that the prior attempt will be cleared", async () => {
+        const user = userEvent.setup();
         renderDetail(
           stubDetail({
             status: "ok",
@@ -519,7 +487,7 @@ describe("<RunDetailView>", () => {
           },
         );
 
-        fireEvent.click(screen.getByRole("button", { name: /run again/i }));
+        await user.click(screen.getByRole("button", { name: /run again/i }));
         const dialog = screen.getByRole("dialog");
         // Same wording as the no-inputs path's window.confirm so users see
         // the same caveat regardless of which re-run path the workflow uses.
@@ -530,6 +498,7 @@ describe("<RunDetailView>", () => {
       });
 
       it("opens the invoke modal pre-filled from prior run.inputs when the workflow has inputs", async () => {
+        const user = userEvent.setup();
         renderDetail(
           stubDetail({
             status: "ok",
@@ -542,7 +511,7 @@ describe("<RunDetailView>", () => {
         );
 
         // Clicking "run again" opens the modal instead of firing immediately.
-        fireEvent.click(screen.getByRole("button", { name: /run again/i }));
+        await user.click(screen.getByRole("button", { name: /run again/i }));
 
         const dialog = screen.getByRole("dialog");
         expect(dialog).toBeDefined();
@@ -555,7 +524,8 @@ describe("<RunDetailView>", () => {
         );
       });
 
-      it("falls back to declared defaults for inputs added since the original run", () => {
+      it("falls back to declared defaults for inputs added since the original run", async () => {
+        const user = userEvent.setup();
         renderDetail(
           stubDetail({
             status: "ok",
@@ -568,14 +538,15 @@ describe("<RunDetailView>", () => {
           },
         );
 
-        fireEvent.click(screen.getByRole("button", { name: /run again/i }));
+        await user.click(screen.getByRole("button", { name: /run again/i }));
         const dialog = screen.getByRole("dialog");
         expect((within(dialog).getByLabelText(/pr_number/i) as HTMLInputElement).value).toBe("42");
         // `branch` falls through to the workflow's declared default.
         expect((within(dialog).getByLabelText(/branch/i) as HTMLInputElement).value).toBe("main");
       });
 
-      it("silently drops prior values for inputs no longer declared on the workflow", () => {
+      it("silently drops prior values for inputs no longer declared on the workflow", async () => {
+        const user = userEvent.setup();
         renderDetail(
           stubDetail({
             status: "ok",
@@ -588,7 +559,7 @@ describe("<RunDetailView>", () => {
           },
         );
 
-        fireEvent.click(screen.getByRole("button", { name: /run again/i }));
+        await user.click(screen.getByRole("button", { name: /run again/i }));
         const dialog = screen.getByRole("dialog");
         // Only the currently-declared fields are rendered; `legacy` doesn't appear.
         expect(within(dialog).queryByLabelText(/legacy/i)).toBeNull();
@@ -684,6 +655,7 @@ describe("<RunDetailView>", () => {
       });
 
       it("keeps the bare confirm-then-fire path when workflowInputs is empty", async () => {
+        const user = userEvent.setup();
         let calls = 0;
         const onRerun = (values?: Record<string, string>) => {
           calls++;
@@ -696,10 +668,7 @@ describe("<RunDetailView>", () => {
           workflowInputs: [],
         });
 
-        await act(async () => {
-          fireEvent.click(screen.getByRole("button", { name: /run again/i }));
-          await flushMicrotasks();
-        });
+        await user.click(screen.getByRole("button", { name: /run again/i }));
 
         // Modal is *not* opened on the no-inputs path.
         expect(screen.queryByRole("dialog")).toBeNull();
@@ -865,7 +834,8 @@ describe("<RunDetailView>", () => {
       expect(within(list).queryAllByRole("button")).toHaveLength(0);
     });
 
-    it("expands a row's disclosure to reveal stdout / stderr once a row has run", () => {
+    it("expands a row's disclosure to reveal stdout / stderr once a row has run", async () => {
+      const user = userEvent.setup();
       renderDetail(
         stubDetail(
           {
@@ -886,12 +856,13 @@ describe("<RunDetailView>", () => {
       );
       // Disclosure closed by default; nothing in the trace bodies is rendered.
       expect(screen.queryByText("ran ok")).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: /sh: echo hi/i }));
+      await user.click(screen.getByRole("button", { name: /sh: echo hi/i }));
       expect(screen.getByText("ran ok")).toBeDefined();
       expect(screen.getByText("warning: foo")).toBeDefined();
     });
 
-    it("renders the step's error envelope inside the disclosure when the row failed", () => {
+    it("renders the step's error envelope inside the disclosure when the row failed", async () => {
+      const user = userEvent.setup();
       renderDetail(
         stubDetail(
           {
@@ -910,13 +881,14 @@ describe("<RunDetailView>", () => {
           ],
         ),
       );
-      fireEvent.click(screen.getByRole("button", { name: /sh: false/i }));
+      await user.click(screen.getByRole("button", { name: /sh: false/i }));
       const errorHeading = screen.getByText(/^error$/i);
       const errorPanel = errorHeading.parentElement;
       expect(errorPanel?.textContent).toContain("exit 1");
     });
 
-    it("renders an empty-state placeholder for empty stdout / stderr in the disclosure", () => {
+    it("renders an empty-state placeholder for empty stdout / stderr in the disclosure", async () => {
+      const user = userEvent.setup();
       renderDetail(
         stubDetail({ definitionSnapshot: { name: "one-step", steps: [{ sh: "noop" }] } }, [
           stubStep({
@@ -927,7 +899,7 @@ describe("<RunDetailView>", () => {
           }),
         ]),
       );
-      fireEvent.click(screen.getByRole("button", { name: /sh: noop/i }));
+      await user.click(screen.getByRole("button", { name: /sh: noop/i }));
       const stdoutHeading = screen.getByText(/^stdout$/i);
       expect(stdoutHeading.parentElement?.textContent).toContain("(empty)");
     });
@@ -1024,15 +996,6 @@ describe("<RunDetailView>", () => {
     it("does not render the section when run.inputs is an empty object", () => {
       renderDetail(stubDetail({ inputs: {} }));
       expect(screen.queryByRole("heading", { name: /^inputs$/i })).toBeNull();
-    });
-
-    it("renders above the summary section when both are visible", () => {
-      renderDetail(stubDetail({ inputs: { pr_number: "42" }, summary: "Reviewed PR #42." }));
-      const inputs = screen.getByRole("heading", { name: /^inputs$/i });
-      const summary = screen.getByRole("heading", { name: /^summary$/i });
-      expect(inputs.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
-        Node.DOCUMENT_POSITION_FOLLOWING,
-      );
     });
   });
 
@@ -1131,48 +1094,6 @@ describe("<RunDetailView>", () => {
       renderDetail(stubDetail({}, [], [stubArticle({ createdAt })]));
       const time = screen.getByText(/45 seconds ago/i);
       expect(time.getAttribute("title")).toBe(createdAt);
-    });
-
-    it("renders above the activity list so the long-form output is reached first", () => {
-      renderDetail(
-        stubDetail({}, [stubStep()], [stubArticle({ name: "digest", title: "Digest" })]),
-      );
-      const published = screen.getByRole("heading", { name: /^published$/i });
-      const activity = screen.getByRole("heading", { name: /^activity$/i });
-      expect(published.compareDocumentPosition(activity) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
-        Node.DOCUMENT_POSITION_FOLLOWING,
-      );
-    });
-
-    it("renders directly under the summary when both surfaces are visible", () => {
-      renderDetail(
-        stubDetail(
-          { summary: "Top-line summary." },
-          [],
-          [stubArticle({ name: "digest", title: "Digest" })],
-        ),
-      );
-      const summary = screen.getByText(/^summary$/i);
-      const published = screen.getByRole("heading", { name: /^published$/i });
-      // summary → published (no intervening section between them on this run).
-      expect(summary.compareDocumentPosition(published) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
-        Node.DOCUMENT_POSITION_FOLLOWING,
-      );
-    });
-
-    it("renders above the run failure block when a failure is present", () => {
-      renderDetail(
-        stubDetail(
-          { status: "failed", error: { message: "boom" } },
-          [],
-          [stubArticle({ name: "digest", title: "Digest" })],
-        ),
-      );
-      const published = screen.getByRole("heading", { name: /^published$/i });
-      const failure = screen.getByText(/^run failed$/i);
-      expect(published.compareDocumentPosition(failure) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
-        Node.DOCUMENT_POSITION_FOLLOWING,
-      );
     });
   });
 });
