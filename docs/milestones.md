@@ -6,8 +6,8 @@ Companion to `design-notes.md`. M0–M7 are shipped — see `git log` for the hi
 
 These are constraints, not work items. They hold for every milestone below.
 
-- Standard step envelope (`status`, `output`, `error`, `traces`, `meta`) — established in M0, never deferred
-- Workflow YAML validated against a Zod schema; the top-level shape is fixed (`steps`, `inputs`, `summarize`, `publish`, `gating`) but step `env:` contents are bundle-defined and not validated by kiri
+- Standard step envelope (`status`, `output`, `error`, `traces`) — established in M0, never deferred
+- Workflow YAML validated against a Zod schema; the top-level shape is fixed (`steps`, `inputs`, `summarize`, `publish`) but step `env:` contents are bundle-defined and not validated by kiri
 - No shell interpolation of inputs anywhere — argv arrays and env vars only
 - Kiri is a CLI launched per-repo; workflow definitions live in `<cwd>/workflows/` of whichever repo Kiri is running against. No global cross-repo store
 - Repo-scoped runtime state lives in `<cwd>/.kiri/` (gitignored)
@@ -17,28 +17,20 @@ These are constraints, not work items. They hold for every milestone below.
 - Per-step env scope; user `env:` applied first, kiri- and OS-controlled vars overwrite on collision; `KIRI_` prefix reserved
 - Step output rendered as plain text in the UI. Markdown rendering is reserved for surfaces with explicit content semantics — `publish:` articles (M6) and `summarize:` summaries — routed through the same sandboxed renderer. Raw step stdout/stderr stays plain text.
 
-## M8 — Todos + gating
+## M8 — Recommendations
 
-- `gating: "auto" | "propose"` field on workflow definitions
-- Todo SQLite schema with lifecycle: pending → approved/auto → in-flight → completed/failed → archived
-- Producing step declares the dedup key (mechanism TBD when this milestone starts — parsed from stdout, since M9's meta channel is deferred)
-- Right-rail UI: pending todos with approve/reject inline
-- Active todos linked to originating run and downstream feed entries
-- Invoking a propose-gated workflow lands as a todo rather than executing immediately
-- Auto-gated workflows run as before, with todo entry visible for traceability
+Workflows surface proposed follow-up workflow invocations attached to the producing run. Each recommendation is a trigger button on the run detail page that opens the standard invoke modal pre-filled with the recommendation's workflow + inputs. Not a global queue; not a lifecycle state machine — emit-time output that mirrors `publish:` articles.
 
-## M9 — Generic step meta (deferred)
-
-Originally a generic key-value channel any step can populate, with `claude-code` writing `{ cost_usd, tokens_in, tokens_out, model }` for cost visibility on the feed.
-
-**Status: deferred.** An earlier iteration shipped the runner side (`KIRI_META_FILE` env injection + a `usage` column on `run_steps`) without the read-back or UI promotion. The unread file channel and unused column were retired alongside the snapshot rework so the runtime contract reflects what actually runs. Picking this back up means deciding the transport (file channel, stdout sentinel, or something else) and then implementing the full read-back + DB persistence + feed-header promotion as a single landed feature — no half-shipped scaffolding.
-
-Reference for the underlying numbers when this is revisited: ccusage's transcript-parsing approach.
-
-## M10 — Polish
-
-- Feed filtering and scoping (by workflow, by status)
-- Global pause control top-right; halts new invocations; modifier-click also kills in-flight
+- `KIRI_RECOMMENDATIONS_FILE` env var injected on every main step's spawn — not on `publish:` or `summarize:`. Per-step file path in the run's scratch dir.
+- File contents are JSON Lines, one recommendation per line: `{ title, workflow, description?, inputs? }`. `inputs` is a `Record<string, string>` matching the target workflow's declared inputs; the invoke modal pre-fills with these values.
+- After each `ok` step's envelope is written, the runner ingests its recommendations file: one row per parsed line into a `recommendations` table linked to the run, preserving emission `index`. Malformed lines are logged and skipped without failing the step. Failed and cancelled steps skip their file entirely.
+- `recommendations` table: `id`, `runId`, `index`, `title`, `description`, `workflow`, `inputs` (JSON), `actionedRunId` (nullable FK to `runs`), `actionedAt` (nullable). Indexes on `(runId)` and `(actionedRunId)`.
+- Run detail page renders a "Recommended" section, sibling to "Published," beneath the steps section.
+- Triggering a recommendation opens the standard invoke modal pre-filled with `workflow` + `inputs` — the user can edit before confirming. On confirm, the runner spawns the workflow, and the recommendation row is updated with `actionedRunId` + `actionedAt`. The trigger button flips into a status-badged link to the spawned run.
+- Run delete cascade: the deleted run's own recommendations are removed; recommendations from other runs whose `actionedRunId` points at the deleted run have it nulled (`actionedAt` nulled with it), restoring them to triggerable.
+- Rerun semantics: the rerun's own recommendations are wiped (mirrors articles + steps); recommendations from other runs pointing at the rerun via `actionedRunId` are left untouched — the link still resolves to a real run, even if the run's content has changed.
+- Feed entry surfaces a small count when a run has recommendations ("3 recommended").
+- A recommendation whose `workflow` is no longer in the registry renders the trigger button disabled with a "workflow not found" tooltip.
 
 ## Out of scope (v1)
 
@@ -48,7 +40,7 @@ Capability:
 - Auto-retry, DLQ
 - Webhooks, inbox polling (poll inside a manually-invoked workflow step instead)
 - Multi-user, auth, sharing
-- Tool-granular gating (workflow-level only)
+- Global todo / inbox surface for cross-workflow proposed actions (recommendations attach to the producing run only)
 - Dynamic per-call permission policy (static per step only)
 - Persistent execution across app restarts
 - Custom DSL for workflows

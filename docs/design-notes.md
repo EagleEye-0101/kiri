@@ -4,7 +4,7 @@
 
 ## Concept
 
-A local-first, git-based workflow orchestrator for personal automation. Scripts and AI workflows invoked by hand. A feed UI streams activity, a todo list captures gated proposals, and a global pause provides a panic button. Single user (me), running while the app is active.
+A local-first, git-based workflow orchestrator for personal automation. Scripts and AI workflows invoked by hand. A feed UI streams activity, and each run can surface recommended follow-up runs as one-click trigger buttons on its detail page. Single user (me), running while the app is active.
 
 What sets kiri apart from Windmill, Kestra, n8n, Inngest et al. is the **feed-first UI** — activity stream as the primary surface, not a node-graph canvas.
 
@@ -28,7 +28,6 @@ inputs:                    # optional — parameters collected via a modal at in
   - name: pr_number
     description: The PR to review
     required: true
-gating: auto               # or "propose" (M8)
 steps:
   - use: fetch-pr           # script bundle: scripts/fetch-pr/run.sh
     env:
@@ -102,7 +101,7 @@ A workflow optionally declares `inputs:` — named parameters collected at invoc
 - Step `env:` values are either a literal string or a structured `{ input: <name> }` reference pointing at a declared input. At run-start the runner resolves each declared input to a final value (supplied at invoke, otherwise the input's `default`) and snapshots the resolved `Record<string, string>` onto `runs.inputs`. At spawn the runner walks each step's, summarise's, and publish's `env:`, replacing every `{ input: <name> }` entry with the snapshotted value; kiri-scoped vars and OS essentials overlay afterwards, so user env never wins on collision.
 - Input values are snapshotted onto the `runs` row, so the feed shows what a run was invoked with and a re-run can pre-fill the form.
 
-Every run records a `trigger` origin on its `runs` row — `manual` today, with todo-approved runs distinguished when M8 lands. It is feed-display metadata and is not exposed to step env.
+Every run records a `trigger` origin on its `runs` row — `manual` today. It is feed-display metadata and is not exposed to step env.
 
 ### State storage
 
@@ -120,7 +119,7 @@ Workflow definitions are YAML files in `workflows/` — the single source of tru
 
 When a run starts, the executor captures three things to pin the run's context:
 
-- The resolved workflow definition (name, steps, env, gating, summarize, publish) onto the `runs` row as `definitionSnapshot`. Feed entries always show the workflow shape that ran, even if the YAML file is later edited or deleted (UI shows a "(deleted)" badge when the registry no longer has the name).
+- The resolved workflow definition (name, steps, env, summarize, publish) onto the `runs` row as `definitionSnapshot`. Feed entries always show the workflow shape that ran, even if the YAML file is later edited or deleted (UI shows a "(deleted)" badge when the registry no longer has the name).
 - The resolved input values onto `runs.inputs`. Null when the workflow declared no `inputs:` block; otherwise a `Record<string, string>` with one entry per declared input that resolved to a value (supplied at invoke or via the input's `default`). The same snapshot is consulted when resolving `{ input: <name> }` env references at every step's, summarise's, and publish's spawn.
 - The data repo's git ref at run-start: the HEAD commit (`runs.gitSha`) plus a `runs.gitDirty` flag for uncommitted changes. The data dir is already a git repo by convention, so a single SHA pins every file the run could possibly have read — bundle scripts, prompts, anything `run.sh` resolves at runtime. The UI renders the short sha (with a dirty marker when applicable) in the run header.
 
@@ -128,13 +127,36 @@ Kiri does not snapshot individual bundle files or prompts into the database. Rep
 
 Re-running an old run uses the *current* definition and *current* working tree, not the snapshot. Replay-from-snapshot is out of scope for v1.
 
-## Todo system
+## Recommendations
 
-Workflows can produce todos. A todo is a proposed workflow invocation waiting for approval (or auto-execution if its workflow is configured `gating: "auto"`).
+Workflows can surface proposed follow-up workflow invocations alongside the run that produced them. A run that aggregates open PRs, for example, can emit one recommendation per PR pointing at a `pr-review` workflow with `pr_number` pre-filled — turning the aggregator's output into a launch pad for one-click follow-ups.
 
-- **Deduplication.** The producing script declares the dedup key. Recommended shape for repo-scoped tasks: `{repo}/{pr_id}/{head_sha}` — new commits produce a new todo and the old one auto-archives, preserving timeline integrity.
-- **Gating.** Per-workflow toggle: `auto` (run immediately, post results to feed) or `propose` (sit in todo list, wait for human approval).
-- **Lifecycle.** Pending → approved (or auto) → in-flight → completed/failed → archived. Visible in the right-rail todo view with linked feed entries.
+Recommendations are not a global queue. There is no inbox, no right-rail list, no lifecycle state machine. Each recommendation belongs to its producing run, surfaces on that run's detail page, and is acted on or ignored in place. The shape mirrors `publish:` articles: emit-time output, persisted as rows linked to the run.
+
+### Emission
+
+A step writes JSON Lines to a file path provided in `KIRI_RECOMMENDATIONS_FILE` (per step, in the run's scratch dir):
+
+```jsonl
+{"title":"Review PR #123","description":"+500/-200, refactor user auth","workflow":"pr-review","inputs":{"pr_number":"123"}}
+{"title":"Review PR #124","description":"+12/-3, fix typo","workflow":"pr-review","inputs":{"pr_number":"124"}}
+```
+
+Per-line fields: `title` (required), `workflow` (required — name of the workflow to invoke), `description` (optional — displayed under the title), `inputs` (optional `Record<string, string>` pre-filled into the invoke modal). Only the main `steps:` get the env var — `publish:` and `summarize:` do not emit recommendations. A failed step's file is discarded; only `ok` steps contribute rows. Malformed lines are logged and skipped without failing the step retrospectively.
+
+### Storage
+
+Stored in a `recommendations` table linked to the producing run via `runId`, with `index` preserving emission order. Each row carries the emitted payload plus two nullable mutables: `actionedRunId` and `actionedAt`, set when the user triggers the recommendation. No state machine; the only transition is "untriggered → triggered (with a run id pinned)." Indexes on `(runId)` for the detail-page read and `(actionedRunId)` to keep the cascade cheap on run delete.
+
+### Actioning
+
+On the run detail page, recommendations render as a "Recommended" section, sibling to "Published." Each entry shows title + description and a trigger button. Clicking the button opens the standard invoke modal pre-filled with the recommendation's `workflow` + `inputs`; the user can edit before confirming, same gesture as a normal invoke. On confirm, the runner spawns the workflow and the recommendation row's `actionedRunId` + `actionedAt` are written. The trigger button flips into a status-badged link to the spawned run.
+
+If the actioned run is later deleted, `actionedRunId` and `actionedAt` are nulled in the same delete transaction, restoring the recommendation to triggerable. Rerun reuses the run id, so a rerun of an actioned run leaves the recommendation's link intact — same behaviour as everywhere else: the destination mutates but the link still works.
+
+A recommendation whose `workflow` is no longer in the registry renders the trigger button disabled with a "workflow not found" tooltip — same affordance as the "deleted" badge on feed rows for missing workflows.
+
+The feed entry surfaces a small count when a run has recommendations ("3 recommended"), signalling to click through to the detail page.
 
 ## AI integration
 
@@ -190,12 +212,9 @@ For workflows using broad `Bash(*)` permissions, the load-bearing defence is the
 
 ## UI
 
-Three regions today; the top-right global pause arrives later with polish:
-
 - **Left rail: workflows nav.** Lists workflows from the registry, each linking to its detail page.
-- **Center: feed.** Reverse-chronological activity log. Each row shows workflow name, status, trigger, duration, and (when present) the run's one-or-two-sentence summary plus a chip-list of published articles. Clicking a row opens the run detail page (`/runs/:id`) with full traces; clicking an article chip opens its dedicated page (`/runs/:id/published/:name`).
-- **Right rail: recently published + todos.** A "Recently Published" section lists the most recent articles across all runs, each linking to its article page; it live-updates as runs publish. Todos — pending proposals + active items with inline approve/reject — land alongside it. (Todos land with M8.)
-- **Top right: global pause.** Halts new invocations. Modifier to also kill in-flight runs. (Lands with M10.)
+- **Center: feed.** Reverse-chronological activity log. Each row shows workflow name, status, trigger, duration, and (when present) the run's one-or-two-sentence summary plus a chip-list of published articles. A small count signals when a run carries recommendations. Clicking a row opens the run detail page (`/runs/:id`) with full traces, the run's recommendations, and its published articles; clicking an article chip opens its dedicated page (`/runs/:id/published/:name`).
+- **Right rail: recently published.** Lists the most recent articles across all runs, each linking to its article page; live-updates as runs publish.
 
 Cost visibility is deferred (see *Cost tracking* above).
 
@@ -305,7 +324,7 @@ Non-goals to resist scope creep:
 - Auto-retry, DLQ
 - Webhooks, inbox polling
 - Multi-user, auth, sharing
-- Tool-granular propose-to-approve (workflow-level only)
+- Global todo / inbox surface for cross-workflow proposed actions (recommendations attach to the producing run only)
 - Dynamic per-call permission policy (static per step only)
 - Persistent execution across app restarts (graceful halt on close, manual re-run on reopen)
 - Custom DSL for workflows
@@ -332,9 +351,7 @@ Sequenced for fastest path to dogfooding, then layering capability outward. Each
 
 **Next up (M8 onwards):**
 
-14. **Todos + gating** (M8). `gating:` field, dedup keys, propose vs auto, right-rail UI.
-15. **Generic step meta** (M9). Deferred. The original design used a `KIRI_META_FILE` file channel for steps to emit cost/tokens/model; that wiring was retired without ever being read back. Re-introducing this needs both a transport and the UI promotion to feed-entry headers.
-16. **Polish** (M10). Feed filtering and scoping, global pause control with kill-in-flight modifier.
+14. **Recommendations** (M8). Workflows emit follow-up workflow invocations via a `KIRI_RECOMMENDATIONS_FILE` file channel. Stored as rows linked to the producing run, surfaced on the run detail page as a "Recommended" section sibling to "Published," and triggered via the standard invoke modal with inputs pre-filled.
 
 ## Open questions
 
