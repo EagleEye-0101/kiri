@@ -40,7 +40,6 @@ Kiri is a **local-first, git-based workflow orchestrator**. A workflow is a line
 # yaml-language-server: $schema=../.kiri/workflow.schema.json   # editor LSP
 
 name: My Workflow            # required, unique across workflows/
-gating: auto                 # optional: "auto" | "propose" (M8 — not wired yet)
 
 inputs:                      # optional — parameters collected via a modal at invoke
   - name: pr_number          # identifier referenced from a step's env (`{ input: pr_number }`)
@@ -119,6 +118,37 @@ Mixing `use:` and `sh:` on the same step is a schema error.
 - Failure is non-fatal — `runs.status` stays whatever `steps:` decided.
 - Empty stdout leaves `summary` null.
 
+### Recommendations — proposed follow-up workflows
+
+A main step can recommend follow-up workflow invocations attached to its run. They surface on the run detail page under a **Recommended** section as trigger buttons; clicking one opens the standard invoke modal pre-filled with the proposed inputs. Use this when a run *enumerates* things a follow-up could act on — open PRs, failing tests, queued items — so each enumerated thing turns into a one-click launch.
+
+- Write JSON Lines to the path in `$KIRI_RECOMMENDATIONS_FILE`, one object per line: `{ title, workflow, description?, inputs? }`. `title` and `workflow` are required; `inputs` is a flat `{ string: string }` map matching the target workflow's declared inputs.
+- `KIRI_RECOMMENDATIONS_FILE` is set on **main `steps:` only** — not on `publish:` or `summarize:`. Don't read it from those phases.
+- Only `ok` steps' files are ingested. A failed or cancelled step's recommendations are discarded.
+- Malformed JSON or schema-failing lines are logged and skipped without affecting the step; surrounding valid lines still ingest.
+- Cross-step ingestion order is preserved: a recommendation from step 0 always has a lower `index` than one from step 1.
+- Don't try to look the target workflow up at emission time — the runner doesn't validate it. If the workflow disappears from your repo before the user clicks, the trigger button simply renders disabled with a "workflow not found" tooltip.
+
+Example (a step that aggregates open PRs and recommends a per-PR review):
+
+```yaml
+name: open-prs
+steps:
+  - sh: |
+      # gh pr list is scoped to a single repo, so resolve owner/name once.
+      repo=$(gh repo view --json owner,name --jq '"\(.owner.login)/\(.name)"')
+      gh pr list --json number,title,author | jq -c '.[]' | while read -r pr; do
+        number=$(echo "$pr" | jq -r .number)
+        title=$(echo "$pr" | jq -r .title)
+        author=$(echo "$pr" | jq -r .author.login)
+        jq -nc --arg n "$number" --arg t "$title" --arg a "$author" --arg r "$repo" \
+          '{title: ("Review pull request " + $r + " #" + $n), description: ($t + " (by @" + $a + ")"), workflow: "pr-review", inputs: {pr_number: $n, repo: $r}}' \
+          >> "$KIRI_RECOMMENDATIONS_FILE"
+      done
+```
+
+Putting the action + `owner/repo` + PR number in the title and saving the PR's own title for the description keeps recommendations scannable across repos — without the repo qualifier a feed mixing runs against different repos would show indistinguishable "Review PR #5" entries.
+
 ---
 
 ## How data flows between steps
@@ -147,6 +177,7 @@ steps[2] stdin = steps[1] stdout  steps[2] stdout
 | `KIRI_REPO_ROOT` | Absolute path of the workspace root (where `kiri` was launched). Resolve all relative paths (`prompts/foo.tpl`, etc.) against this. |
 | `KIRI_BUNDLE_DIR` | Absolute path to the bundle's own dir (e.g. `<root>/scripts/<name>/`). **Only set for `use:` steps** — sh-steps don't have a bundle. |
 | `KIRI_RUN_CONTEXT_FILE` | Absolute path to a JSON file with the run envelope so far. **Only set for `publish:` and `summarize:` steps.** |
+| `KIRI_RECOMMENDATIONS_FILE` | Absolute path the step may write JSON Lines to, one recommendation per line: `{title, workflow, description?, inputs?}`. Lines are ingested as `recommendations` rows after the step succeeds; failed and cancelled steps' files are discarded. **Only set on main `steps:` — not `publish:` or `summarize:`.** |
 | `PATH`, `HOME`, `USER`, `LOGNAME` | Inherited from the kiri parent process. |
 
 Step working directory is the **per-run scratch dir** at `.kiri/runs/<run-id>/`, not the repo root. Use `KIRI_REPO_ROOT` to reach repo files.
@@ -249,7 +280,7 @@ If no `PROMPT`/`PROMPT_FILE` is given, the bundle's baked-in prompt hands Claude
 - Names: `[A-Z_][A-Z0-9_]*`.
 - Unknown vars resolve to empty.
 - Substituted values are **not** re-scanned — a value containing `{{X}}` stays literal.
-- Available vars: `KIRI_INPUT`, `KIRI_RUN_ID`, `KIRI_STEP_INDEX`, `KIRI_REPO_ROOT`, `KIRI_BUNDLE_DIR`, `KIRI_RUN_CONTEXT_FILE` (for `publish:`/`summarize:`), plus anything in the step's own `env:` block.
+- Available vars: `KIRI_INPUT`, `KIRI_RUN_ID`, `KIRI_STEP_INDEX`, `KIRI_REPO_ROOT`, `KIRI_BUNDLE_DIR`, `KIRI_RUN_CONTEXT_FILE` (for `publish:`/`summarize:`), `KIRI_RECOMMENDATIONS_FILE` (for main steps only), plus anything in the step's own `env:` block.
 
 Example template:
 

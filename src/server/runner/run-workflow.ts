@@ -14,6 +14,7 @@ import {
   isUseStep,
 } from "../workflows/index.ts";
 import type { CancelRegistry } from "./cancel-registry.ts";
+import { ingestStepRecommendations } from "./recommendations.ts";
 import { type StepEnvelope, runStep } from "./run-step.ts";
 
 export interface RunWorkflowArgs {
@@ -53,7 +54,6 @@ export interface StartedRun {
 interface DefinitionSnapshot {
   name: string;
   steps: WorkflowStep[];
-  gating?: "auto" | "propose";
   summarize?: WorkflowStep;
   publish?: PublishEntry[];
 }
@@ -75,7 +75,6 @@ type ExecutedStep = ({ kind: "use"; use: string } | { kind: "sh"; sh: string }) 
 const snapshotDefinition = (def: WorkflowDefinition): DefinitionSnapshot => ({
   name: def.name,
   steps: def.steps.map((s) => ({ ...s })),
-  gating: def.gating,
   summarize: def.summarize ? { ...def.summarize } : undefined,
   publish: def.publish ? def.publish.map((p) => ({ ...p })) : undefined,
 });
@@ -302,15 +301,30 @@ export function runWorkflow(
     try {
       mkdirSync(scratchDir, { recursive: true });
       let input = "";
+      // Cross-step counter so the order steps emitted in is preserved
+      // by `recommendations.index` regardless of how many lines each
+      // step contributed.
+      let recommendationIndex = 0;
       for (let i = 0; i < definition.steps.length; i++) {
         if (args.cancelRegistry?.isCancelled(runId)) break;
 
         const step = definition.steps[i];
+        const recommendationsFile = join(scratchDir, `recommendations-${i}.jsonl`);
         const { envelope, cancelled, stepStatus, stepError } = await executePhase({
           step,
           index: i,
           input,
+          envExtras: { KIRI_RECOMMENDATIONS_FILE: recommendationsFile },
         });
+
+        if (stepStatus === "ok") {
+          recommendationIndex = ingestStepRecommendations(
+            db,
+            runId,
+            recommendationsFile,
+            recommendationIndex,
+          );
+        }
 
         const stepIdent: { kind: "use"; use: string } | { kind: "sh"; sh: string } = isUseStep(step)
           ? { kind: "use", use: step.use }

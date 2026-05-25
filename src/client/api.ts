@@ -56,7 +56,6 @@ export interface WorkflowSummary {
   /** Defined when the workflow declares an `inputs:` block; absent otherwise. */
   inputs?: WorkflowInputSummary[];
   steps: WorkflowStepSummary[];
-  gating?: "auto" | "propose";
   /** Defined when the workflow has at least one `publish:` entry. */
   publish?: WorkflowPublishSummary[];
   /** Defined when the workflow has a `summarize:` step. */
@@ -113,6 +112,13 @@ export type RunPublishSnapshot =
  * page. Empty for runs that didn't publish anything. The same field
  * powers both feed-row chips and the run detail's Published section
  * so consumers read from one place.
+ *
+ * `recommendationsCount` is the run's emitted-recommendation total,
+ * populated by the server in a single grouped aggregation across the
+ * page. The feed surfaces it as a "N recommendations" marker in the
+ * row's byline when greater than zero. The full array lives on the
+ * detail response under `recommendations` — only the count travels
+ * with feed rows.
  */
 export interface RunListEntry {
   id: string;
@@ -126,7 +132,6 @@ export interface RunListEntry {
   definitionSnapshot: {
     name: string;
     steps: WorkflowStepSummary[];
-    gating?: "auto" | "propose";
     summarize?: WorkflowStepSummary;
     publish?: RunPublishSnapshot[];
   };
@@ -146,6 +151,7 @@ export interface RunListEntry {
   inputs: Record<string, string> | null;
   isInterrupted: boolean;
   articles: ArticleSummary[];
+  recommendationsCount: number;
 }
 
 /**
@@ -184,12 +190,39 @@ export interface ArticleSummary {
 }
 
 /**
+ * One follow-up workflow invocation a run has proposed, as seen by the
+ * run-detail consumer. `actionedRunId` + `actionedAt` are null until the
+ * user triggers the recommendation; `actionedRunStatus` ships the target
+ * run's lifecycle status so the trigger button can render as a
+ * status-badged link without an extra round-trip.
+ */
+export interface RecommendationSummary {
+  id: string;
+  index: number;
+  title: string;
+  description: string | null;
+  workflow: string;
+  inputs: Record<string, string> | null;
+  actionedRunId: string | null;
+  actionedAt: string | null;
+  actionedRunStatus: "running" | "ok" | "failed" | "cancelled" | null;
+}
+
+/**
+ * The run row as returned on `GET /api/runs/:id`. Extends the feed-row
+ * shape with the per-run `recommendations` array (the list endpoint
+ * omits this — only the count travels with feed rows).
+ */
+export type RunDetailRun = RunListEntry & { recommendations: RecommendationSummary[] };
+
+/**
  * Full run as returned by `GET /api/runs/:id`: the run row (which
- * carries its articles on `run.articles`, ordered by creation time)
- * and its pipeline steps ordered by index.
+ * carries its articles and recommendations, ordered by creation time
+ * and emission index respectively) and its pipeline steps ordered by
+ * index.
  */
 export interface RunDetail {
-  run: RunListEntry;
+  run: RunDetailRun;
   steps: RunStepRow[];
 }
 
@@ -390,6 +423,33 @@ export const rerunRun = async (
     init.headers = { "Content-Type": "application/json" };
   }
   return json<RunStartResult>(await apiFetch(`/api/runs/${encodeURIComponent(id)}/rerun`, init));
+};
+
+/**
+ * Action a recommendation: spawn the recommendation's workflow and pin
+ * the spawned run id onto the rec row. Resolves on 202 with the new
+ * run id; terminal transitions arrive on the SSE event stream. Pass
+ * `inputs` to forward the user's (possibly edited) modal values. Throws
+ * `ApiError` on non-2xx — 404 if the recommendation isn't on this run,
+ * 409 if it has already been actioned or its workflow has been removed
+ * from the registry, 400 if the inputs fail the workflow's schema.
+ */
+export const actionRecommendation = async (
+  runId: string,
+  recId: string,
+  inputs?: Record<string, string>,
+): Promise<RunStartResult> => {
+  const init: RequestInit = { method: "POST" };
+  if (inputs !== undefined) {
+    init.body = JSON.stringify({ inputs });
+    init.headers = { "Content-Type": "application/json" };
+  }
+  return json<RunStartResult>(
+    await apiFetch(
+      `/api/runs/${encodeURIComponent(runId)}/recommendations/${encodeURIComponent(recId)}/action`,
+      init,
+    ),
+  );
 };
 
 /**
