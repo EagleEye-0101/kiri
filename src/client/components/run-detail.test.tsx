@@ -22,7 +22,6 @@ const stubRun = (overrides: Partial<RunDetailRun> = {}): RunDetailRun => ({
   id: "run-1",
   workflowName: "kiri-self-review",
   status: "ok",
-  trigger: "manual",
   startedAt: new Date(NOW.getTime() - 3 * 60 * 1000).toISOString(),
   finishedAt: new Date(NOW.getTime() - 3 * 60 * 1000 + 12_000).toISOString(),
   error: null,
@@ -111,16 +110,14 @@ describe("<RunDetailView>", () => {
       expect(status?.textContent).toBe("cancelled");
     });
 
-    it("renders the trigger, relative start time and duration in the metadata row", () => {
+    it("renders the relative start time and duration in the metadata row", () => {
       renderDetail(
         stubDetail({
-          trigger: "scheduled",
           startedAt: new Date(NOW.getTime() - 3 * 60 * 1000).toISOString(),
           finishedAt: new Date(NOW.getTime() - 3 * 60 * 1000 + 12_000).toISOString(),
         }),
       );
 
-      expect(screen.getByText(/scheduled/i)).toBeDefined();
       expect(screen.getByText(/3 minutes ago/i)).toBeDefined();
       expect(screen.getByText("12s")).toBeDefined();
     });
