@@ -176,6 +176,56 @@ describe("<WorkflowPage>", () => {
     expect(calls).toBe(1);
   });
 
+  it("resolves a workflow whose name contains a slash from the percent-encoded URL", async () => {
+    server.use(
+      http.get("*/api/workflows", () =>
+        HttpResponse.json([{ name: "examples/recommendations", steps: [{ sh: "echo ok" }] }]),
+      ),
+    );
+
+    // wouter passes the param value verbatim from the URL — slashes arrive
+    // still percent-encoded because wouter uses `decodeURI`, which leaves
+    // `%2F` alone. The page must decode before comparing against the API.
+    const encoded = encodeURIComponent("examples/recommendations");
+    const { sources } = renderWorkflow(encoded, `/workflows/${encoded}`);
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: /examples\/recommendations/i }),
+    ).toBeDefined();
+
+    // Live events arrive with the raw (decoded) name; the filter must use
+    // the decoded value too, otherwise edits never trigger a refetch.
+    let calls = 0;
+    server.use(
+      http.get("*/api/workflows", () => {
+        calls++;
+        return HttpResponse.json([
+          { name: "examples/recommendations", steps: [{ sh: `echo v${calls}` }] },
+        ]);
+      }),
+    );
+
+    act(() => {
+      sources[0]?.emit({ type: "workflow.updated", name: "examples/recommendations" });
+    });
+
+    await screen.findByText(/sh: echo v1/);
+  });
+
+  it("falls back to the raw param when the URL contains a malformed escape", async () => {
+    server.use(
+      http.get("*/api/workflows", () => HttpResponse.json([{ name: "alpha", steps: [] }])),
+    );
+
+    // `%E0` is an incomplete UTF-8 byte and makes decodeURIComponent throw.
+    // The route must still render (not crash) — typically as not-found.
+    const malformed = "alpha%E0";
+    renderWorkflow(malformed, `/workflows/${malformed}`);
+
+    expect(await screen.findByRole("heading", { name: /workflow not found/i })).toBeDefined();
+    expect(screen.getByText(malformed)).toBeDefined();
+  });
+
   it("transitions to not-found when the matching workflow is removed", async () => {
     let calls = 0;
     server.use(
