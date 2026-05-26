@@ -181,10 +181,16 @@ export interface RunStepRow {
  * A run's published article as seen by the run-detail consumer. The
  * markdown body lives on the dedicated article route — only metadata
  * needed to render the "Published" section row travels with the run.
+ *
+ * `heading` is the article body's first markdown `# heading`, derived
+ * server-side, or null when the body has no top-level heading. Surfaces
+ * that list articles use it as a sub-byline so identically-titled
+ * articles from the same workflow are distinguishable.
  */
 export interface ArticleSummary {
   name: string;
   title: string;
+  heading: string | null;
   createdAt: string;
 }
 
@@ -336,14 +342,16 @@ export const fetchArticle = async (runId: string, name: string): Promise<Article
 /**
  * One entry in the cross-run "recently published" list. Carries only the
  * metadata the right rail renders: the link target (`runId` + `name`),
- * the display `title`, the originating `workflowName`, and `createdAt`
- * for the relative timestamp. The markdown body lives on the dedicated
- * article route.
+ * the display `title`, the article body's first markdown `# heading` (or
+ * null when the body has none) for use as a sub-byline, the originating
+ * `workflowName`, and `createdAt` for the relative timestamp. The full
+ * markdown body lives on the dedicated article route.
  */
 export interface RecentArticle {
   runId: string;
   name: string;
   title: string;
+  heading: string | null;
   workflowName: string;
   createdAt: string;
 }
