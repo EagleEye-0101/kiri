@@ -1,0 +1,2767 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kiri — design exploration</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,0..100;1,9..144,300..900,0..100&family=JetBrains+Mono:ital,wght@0,300..800;1,300..800&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --canvas: #0e0f0d;
+        --canvas-2: #131310;
+        --paper: #1a1b19;
+        --paper-2: #21221f;
+        --ink: #e5dfd2;
+        --ink-muted: #8b8579;
+        --ink-faint: #4f4b43;
+        --rule: #2a2a26;
+        --rule-strong: #3a3a34;
+        --accent: #d6b85a;
+        --accent-deep: #a58a3c;
+        --accent-warm: #c99858;
+        --ok: #88a579;
+        --running: #7aaedb;
+        --failed: #d1493e;
+        --pending: #555048;
+
+        --font-display: "Fraunces", "Iowan Old Style", Palatino, Georgia, serif;
+        --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      html {
+        background: var(--canvas);
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 14px;
+        line-height: 1.55;
+        font-feature-settings: "tnum", "ss01";
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+
+      ::selection { background: var(--accent); color: var(--canvas); }
+
+      /* paper-grain — subtle noise overlay. tuned to be barely visible
+         (~3% opacity) but warms the dark surface up considerably. */
+      body::before {
+        content: "";
+        position: fixed; inset: 0;
+        pointer-events: none;
+        z-index: 100;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.9 0 0 0 0 0.85 0 0 0 0 0.75 0 0 0 0.04 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+        opacity: 0.5;
+        mix-blend-mode: overlay;
+      }
+
+      .font-display { font-family: var(--font-display); font-optical-sizing: auto; font-variation-settings: "SOFT" 50; }
+      .font-mono { font-family: var(--font-mono); }
+      .italic { font-style: italic; }
+      .tabular { font-variant-numeric: tabular-nums; }
+      .uppercase { text-transform: uppercase; letter-spacing: 0.12em; }
+      .muted { color: var(--ink-muted); }
+      .faint { color: var(--ink-faint); }
+      .accent { color: var(--accent); }
+      .ok { color: var(--ok); }
+      .running { color: var(--running); }
+      .failed { color: var(--failed); }
+
+      /* ---- document chrome (the meta wrapper around the mockups) ---- */
+      .doc {
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 96px 48px 160px;
+      }
+
+      .doc-masthead {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: end;
+        gap: 24px;
+        padding-bottom: 32px;
+        border-bottom: 1px solid var(--rule);
+      }
+      .doc-masthead .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.22em;
+      }
+      .doc-masthead h1 {
+        font-family: var(--font-display);
+        font-style: italic;
+        font-weight: 400;
+        font-size: clamp(56px, 9vw, 120px);
+        line-height: 0.95;
+        margin: 16px 0 0;
+        color: var(--ink);
+        letter-spacing: -0.02em;
+      }
+      .doc-masthead .colophon {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+        text-align: right;
+        letter-spacing: 0.04em;
+      }
+      .doc-masthead .colophon b { color: var(--ink); font-weight: 500; }
+
+      .doc-toc {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 24px;
+        margin-top: 24px;
+        padding-bottom: 32px;
+        border-bottom: 1px solid var(--rule);
+      }
+      .doc-toc a {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        text-decoration: none;
+        color: inherit;
+        padding: 8px 0;
+      }
+      .doc-toc a:hover .toc-label { color: var(--accent); }
+      .toc-num { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); letter-spacing: 0.18em; }
+      .toc-label { font-family: var(--font-display); font-size: 18px; color: var(--ink); transition: color .15s ease; }
+      .toc-sub { font-family: var(--font-mono); font-size: 11px; color: var(--ink-muted); }
+
+      .section { margin-top: 96px; }
+      .section-eyebrow {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.22em;
+        color: var(--accent);
+      }
+      .section-title {
+        font-family: var(--font-display);
+        font-size: 44px;
+        line-height: 1.05;
+        font-weight: 400;
+        margin: 12px 0 0;
+        max-width: 800px;
+      }
+      .section-deck {
+        font-family: var(--font-display);
+        font-style: italic;
+        font-size: 18px;
+        line-height: 1.45;
+        color: var(--ink-muted);
+        margin: 12px 0 0;
+        max-width: 720px;
+      }
+
+      .critique {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 32px 56px;
+        margin-top: 36px;
+      }
+      .crit h4 {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        margin: 0 0 8px;
+        color: var(--ink-muted);
+      }
+      .crit h4 b { color: var(--ink); font-weight: 500; }
+      .crit p {
+        margin: 0 0 10px;
+        font-size: 13.5px;
+        color: var(--ink);
+        line-height: 1.6;
+      }
+      .crit p + p { margin-top: 4px; }
+      .crit .verdict {
+        display: inline-block;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        padding: 2px 8px;
+        border: 1px solid currentColor;
+        margin-bottom: 8px;
+      }
+      .verdict.keep   { color: var(--ok); }
+      .verdict.lift   { color: var(--accent); }
+      .verdict.rework { color: var(--failed); }
+
+      /* ---- shared "page frame" that mocks the actual product chrome ---- */
+      .frame {
+        margin-top: 48px;
+        background: var(--canvas);
+        border: 1px solid var(--rule);
+        position: relative;
+        box-shadow:
+          0 1px 0 rgba(214, 184, 90, 0.05) inset,
+          0 30px 60px -30px rgba(0, 0, 0, 0.8);
+      }
+      .frame-tag {
+        position: absolute;
+        top: -10px;
+        left: 24px;
+        background: var(--canvas);
+        padding: 0 10px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      .frame-caption {
+        padding: 18px 28px;
+        border-top: 1px solid var(--rule);
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        color: var(--ink-muted);
+        line-height: 1.6;
+        background: var(--canvas-2);
+      }
+      .frame-caption b { color: var(--ink); font-weight: 500; }
+      .frame-caption .pin {
+        display: inline-block;
+        margin-right: 8px;
+        color: var(--accent);
+      }
+
+      /* ---- the actual app shell mock ---- */
+      .shell {
+        display: grid;
+        grid-template-columns: 220px 1fr 280px;
+        gap: 48px;
+        padding: 40px 36px 48px;
+      }
+
+      /* sidebar */
+      .side .wordmark {
+        font-family: var(--font-display);
+        font-style: italic;
+        font-size: 44px;
+        line-height: 0.9;
+        color: var(--ink);
+        letter-spacing: -0.02em;
+        margin: 0;
+      }
+      .side .wordmark-meta {
+        margin-top: 4px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.22em;
+        color: var(--ink-muted);
+      }
+      .side .wordmark-meta b { color: var(--ink); font-weight: 500; }
+      .side .side-section { margin-top: 36px; }
+      .side h2 {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.22em;
+        color: var(--ink-muted);
+        margin: 0 0 12px;
+      }
+      .side ul { list-style: none; margin: 0; padding: 0; }
+      .side li + li { margin-top: 2px; }
+      .side a {
+        display: grid;
+        grid-template-columns: 8px 1fr auto;
+        align-items: center;
+        gap: 10px;
+        padding: 5px 8px 5px 0;
+        color: var(--ink);
+        text-decoration: none;
+        font-size: 13px;
+        line-height: 1.3;
+        border-left: 1px solid transparent;
+        margin-left: -1px;
+        transition: color .15s ease, background .15s ease;
+      }
+      .side a:hover { color: var(--accent); }
+      .side a.active { color: var(--accent); border-left-color: var(--accent); padding-left: 8px; }
+      .side .dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--ink-faint);
+      }
+      .side .dot.ok { background: var(--ok); }
+      .side .dot.running { background: var(--running); animation: pulse 1.8s ease-in-out infinite; }
+      .side .dot.failed { background: var(--failed); }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+      .side .tail {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        color: var(--ink-faint);
+        letter-spacing: 0.03em;
+      }
+      .side .group-label {
+        font-family: var(--font-mono);
+        font-size: 9px;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+        margin: 16px 0 6px 0;
+        padding-bottom: 4px;
+        border-bottom: 1px dashed var(--rule);
+      }
+      .side .group-label:first-child { margin-top: 0; }
+
+      .side .version {
+        margin-top: 48px;
+        padding-top: 16px;
+        border-top: 1px solid var(--rule);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        color: var(--ink-faint);
+      }
+      .side .version b { color: var(--ink-muted); font-weight: 400; }
+
+      /* main column — masthead */
+      .main { min-width: 0; }
+      .main-masthead {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: end;
+        gap: 24px;
+        padding-bottom: 14px;
+        border-bottom: 2px solid var(--ink);
+      }
+      .main-masthead .left .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--ink-muted);
+      }
+      .main-masthead .left h1 {
+        font-family: var(--font-display);
+        font-style: italic;
+        font-weight: 400;
+        font-size: 56px;
+        line-height: 0.95;
+        letter-spacing: -0.015em;
+        margin: 4px 0 0;
+        color: var(--ink);
+      }
+      .main-masthead .right {
+        text-align: right;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        line-height: 1.6;
+        color: var(--ink-muted);
+      }
+      .main-masthead .right .date { color: var(--ink); }
+
+      .day-brief {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: baseline;
+        gap: 14px;
+        padding: 14px 0 18px;
+        border-bottom: 1px solid var(--rule);
+      }
+      .day-brief .label {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--ink-muted);
+      }
+      .day-brief .stats {
+        display: flex;
+        gap: 26px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--ink-muted);
+      }
+      .day-brief .stats b { color: var(--ink); font-weight: 500; }
+      .day-brief .stats .num {
+        font-family: var(--font-display);
+        font-size: 22px;
+        color: var(--ink);
+        font-weight: 400;
+        line-height: 1;
+        margin-right: 6px;
+        font-feature-settings: "lnum", "ss01";
+      }
+      .day-brief .stats .pos { color: var(--ok); }
+      .day-brief .stats .neg { color: var(--failed); }
+
+      /* the day-group header that splits the feed */
+      .day-divider {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        align-items: baseline;
+        gap: 16px;
+        margin: 40px 0 4px;
+      }
+      .day-divider h3 {
+        font-family: var(--font-display);
+        font-style: italic;
+        font-size: 26px;
+        line-height: 1;
+        color: var(--ink);
+        margin: 0;
+        font-weight: 400;
+      }
+      .day-divider .rule {
+        height: 1px;
+        background: linear-gradient(to right, var(--rule) 0%, var(--rule) 60%, transparent 100%);
+        margin-bottom: 8px;
+      }
+
+      /* feed row — base */
+      .feed-row {
+        position: relative;
+        padding: 22px 0 22px 24px;
+        border-bottom: 1px solid var(--rule);
+      }
+      .feed-row::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 30px; bottom: 30px;
+        width: 2px;
+        background: var(--ok);
+      }
+      .feed-row[data-status="failed"]::before { background: var(--failed); }
+      .feed-row[data-status="running"]::before { background: var(--running); }
+      .feed-row[data-status="pending"]::before { background: var(--pending); }
+
+      .feed-row .kicker {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+      }
+      .feed-row .kicker .status { letter-spacing: 0.18em; text-transform: uppercase; color: var(--ok); }
+      .feed-row[data-status="failed"]  .kicker .status { color: var(--failed); }
+      .feed-row[data-status="running"] .kicker .status { color: var(--running); }
+      .feed-row .kicker .dotsep { color: var(--ink-faint); }
+
+      .feed-row a.head {
+        font-family: var(--font-display);
+        font-size: 26px;
+        line-height: 1.15;
+        color: var(--ink);
+        text-decoration: none;
+        display: inline-flex;
+        align-items: baseline;
+        gap: 8px;
+        margin-top: 6px;
+      }
+      .feed-row a.head .arrow {
+        color: var(--ink-muted);
+        font-family: var(--font-mono);
+        font-size: 18px;
+        transition: transform .15s ease, color .15s ease;
+      }
+      .feed-row a.head:hover { color: var(--accent); }
+      .feed-row a.head:hover .arrow { transform: translateX(3px); color: var(--accent); }
+      .feed-row .body { margin-top: 10px; font-size: 14px; line-height: 1.6; color: var(--ink); max-width: 64ch; }
+      .feed-row .body a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent-deep); }
+      .feed-row .articles {
+        margin-top: 12px;
+        display: grid;
+        gap: 4px;
+      }
+      .feed-row .article {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 12px 8px 0;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--ink-muted);
+        text-decoration: none;
+      }
+      .feed-row .article:hover { background: var(--paper); color: var(--ink); }
+      .feed-row .article .a-title {
+        font-family: var(--font-display);
+        font-size: 15px;
+        color: var(--ink);
+      }
+      .feed-row .article .a-sub {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+        margin-left: 10px;
+      }
+      .feed-row .article .a-arrow { color: var(--ink-faint); }
+      .feed-row .article:hover .a-arrow { color: var(--accent); }
+
+      /* --- workflow-type variants on the feed row --- */
+
+      /* roll-up: a batch of identical-workflow runs collapsed into one editorial entry */
+      .feed-row.rollup .head { font-size: 30px; }
+      .feed-row.rollup .rollup-list {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px 32px;
+      }
+      .feed-row.rollup .rollup-item {
+        display: grid;
+        grid-template-columns: auto 1fr auto auto;
+        align-items: baseline;
+        gap: 10px;
+        padding: 6px 0;
+        border-top: 1px dashed var(--rule);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--ink-muted);
+        text-decoration: none;
+      }
+      .feed-row.rollup .rollup-item:hover { color: var(--ink); }
+      .feed-row.rollup .rollup-item .ri-status {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--ok);
+        display: inline-block;
+      }
+      .feed-row.rollup .rollup-item .ri-repo { color: var(--ink); font-family: var(--font-mono); font-size: 12.5px; }
+      .feed-row.rollup .rollup-item .ri-meta { color: var(--ink-muted); }
+      .feed-row.rollup .rollup-item .ri-pr {
+        color: var(--accent);
+        border-bottom: 1px dotted var(--accent-deep);
+      }
+      .feed-row.rollup .rollup-summary {
+        display: inline-flex;
+        gap: 14px;
+        margin-top: 6px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+      }
+      .feed-row.rollup .rollup-summary b {
+        font-family: var(--font-display);
+        font-size: 22px;
+        color: var(--ink);
+        font-weight: 400;
+        line-height: 1;
+        margin-right: 6px;
+      }
+
+      /* PR review: verdict stamp */
+      .feed-row.review .stamp {
+        position: absolute;
+        right: 0;
+        top: 26px;
+        transform: rotate(-3deg);
+        padding: 8px 14px;
+        border: 2px solid var(--ok);
+        color: var(--ok);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        line-height: 1;
+      }
+      .feed-row.review .stamp.nits { color: var(--accent-warm); border-color: var(--accent-warm); }
+      .feed-row.review .stamp.changes { color: var(--failed); border-color: var(--failed); }
+      .feed-row.review .pr-card {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 14px;
+        align-items: center;
+        padding: 10px 14px;
+        border: 1px solid var(--rule);
+        background: var(--paper);
+        text-decoration: none;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--ink);
+        max-width: 64ch;
+      }
+      .feed-row.review .pr-card:hover { border-color: var(--accent); }
+      .feed-row.review .pr-card .pr-num { color: var(--accent); font-weight: 500; }
+      .feed-row.review .pr-card .pr-repo { color: var(--ink-muted); }
+      .feed-row.review .pr-card .pr-title { color: var(--ink); }
+
+      /* News digest: drop cap + source rail */
+      .feed-row.digest .head { font-size: 34px; line-height: 1.05; }
+      .feed-row.digest .deck {
+        margin-top: 14px;
+        font-family: var(--font-display);
+        font-style: italic;
+        font-size: 18px;
+        line-height: 1.45;
+        color: var(--ink);
+        max-width: 56ch;
+      }
+      .feed-row.digest .deck::first-letter {
+        font-family: var(--font-display);
+        font-style: italic;
+        font-size: 64px;
+        float: left;
+        line-height: 0.85;
+        margin: 6px 8px -4px 0;
+        color: var(--accent);
+        font-weight: 400;
+      }
+      .feed-row.digest .sources {
+        margin-top: 14px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 8px;
+      }
+      .feed-row.digest .src {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        padding: 3px 8px;
+        background: var(--paper);
+        color: var(--ink-muted);
+        letter-spacing: 0.03em;
+      }
+      .feed-row.digest .read-cta {
+        display: inline-flex;
+        gap: 8px;
+        align-items: baseline;
+        margin-top: 16px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .feed-row.digest .read-cta::after { content: "→"; font-size: 13px; }
+
+      /* Open PRs: stat-style numeric headline */
+      .feed-row.stat .stat-row {
+        margin-top: 8px;
+        display: flex;
+        align-items: baseline;
+        gap: 28px;
+      }
+      .feed-row.stat .big {
+        font-family: var(--font-display);
+        font-size: 84px;
+        line-height: 0.85;
+        font-weight: 300;
+        letter-spacing: -0.04em;
+        color: var(--ink);
+        font-feature-settings: "lnum", "ss01";
+      }
+      .feed-row.stat .big.accent { color: var(--accent); }
+      .feed-row.stat .stat-meta {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        line-height: 1.6;
+        color: var(--ink-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+      }
+      .feed-row.stat .stat-meta b { color: var(--ink); font-weight: 500; font-family: var(--font-display); text-transform: none; letter-spacing: 0; font-size: 14px; }
+
+      /* right rail */
+      .rail h2 {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.22em;
+        color: var(--ink-muted);
+        margin: 0 0 14px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--rule);
+      }
+      .rail .digest-card {
+        padding: 14px 0;
+        border-bottom: 1px solid var(--rule);
+      }
+      .rail .digest-card .a-eyebrow {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin-bottom: 4px;
+      }
+      .rail .digest-card .a-title {
+        font-family: var(--font-display);
+        font-size: 17px;
+        line-height: 1.2;
+        color: var(--ink);
+      }
+      .rail .digest-card .a-meta {
+        margin-top: 6px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+      }
+      .rail .rail-section { margin-top: 36px; }
+      .rail .agenda li {
+        list-style: none;
+        padding: 8px 0;
+        border-top: 1px dashed var(--rule);
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 10px;
+        align-items: baseline;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--ink);
+      }
+      .rail .agenda li:first-child { border-top: 0; }
+      .rail .agenda .when { color: var(--ink-muted); }
+      .rail .agenda .tag { color: var(--accent); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; }
+
+      /* ============== article reading view ============== */
+      .article-shell {
+        display: grid;
+        grid-template-columns: 220px 1fr 280px;
+        gap: 48px;
+        padding: 40px 36px 56px;
+      }
+      .article-main { min-width: 0; position: relative; }
+      .article-eyebrow {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      .article-h1 {
+        font-family: var(--font-display);
+        font-style: italic;
+        font-weight: 300;
+        font-size: 76px;
+        line-height: 0.95;
+        letter-spacing: -0.02em;
+        margin: 12px 0 0;
+        color: var(--ink);
+      }
+      .article-deck {
+        font-family: var(--font-display);
+        font-size: 20px;
+        line-height: 1.45;
+        color: var(--ink-muted);
+        margin-top: 18px;
+        max-width: 58ch;
+      }
+      .article-byline {
+        margin-top: 28px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: baseline;
+        gap: 16px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--rule);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+        letter-spacing: 0.04em;
+      }
+      .article-byline b { color: var(--ink); font-weight: 500; }
+      .article-byline .right { display: flex; gap: 18px; }
+
+      .article-body {
+        margin-top: 36px;
+        max-width: 68ch;
+      }
+      .article-body > p:first-of-type::first-letter {
+        font-family: var(--font-display);
+        font-weight: 300;
+        font-size: 92px;
+        line-height: 0.75;
+        float: left;
+        margin: 8px 12px 0 0;
+        color: var(--accent);
+        font-feature-settings: "ss01";
+      }
+      .article-body p {
+        margin: 0 0 18px;
+        font-size: 16px;
+        line-height: 1.65;
+        color: var(--ink);
+      }
+      .article-body h2 {
+        font-family: var(--font-display);
+        font-size: 28px;
+        line-height: 1.15;
+        font-weight: 400;
+        margin: 40px 0 12px;
+        color: var(--ink);
+      }
+      .article-body h2 .num {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        letter-spacing: 0.22em;
+        color: var(--ink-faint);
+        text-transform: uppercase;
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .pullquote {
+        margin: 36px -36px 36px 0;
+        padding: 24px 0 24px 24px;
+        border-left: 2px solid var(--accent);
+        font-family: var(--font-display);
+        font-style: italic;
+        font-size: 26px;
+        line-height: 1.3;
+        color: var(--ink);
+        max-width: 56ch;
+      }
+      .pullquote cite {
+        display: block;
+        margin-top: 14px;
+        font-family: var(--font-mono);
+        font-style: normal;
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--ink-muted);
+      }
+
+      .story-card {
+        margin: 18px 0;
+        padding: 18px 22px;
+        border: 1px solid var(--rule);
+        background: var(--paper);
+      }
+      .story-card .sc-eyebrow {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      .story-card .sc-title {
+        font-family: var(--font-display);
+        font-size: 20px;
+        line-height: 1.25;
+        margin: 6px 0 6px;
+        color: var(--ink);
+      }
+      .story-card .sc-meta {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+        margin-bottom: 8px;
+      }
+      .story-card .sc-body { font-size: 14.5px; line-height: 1.6; color: var(--ink); }
+
+      /* article aside (marginalia) */
+      .article-aside {
+        position: sticky;
+        top: 40px;
+        align-self: start;
+      }
+      .article-aside h2 {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.22em;
+        color: var(--ink-muted);
+        margin: 0 0 14px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--rule);
+      }
+      .article-aside .toc-item {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 10px;
+        align-items: baseline;
+        padding: 6px 0;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--ink-muted);
+        text-decoration: none;
+        border-left: 1px solid transparent;
+        margin-left: -1px;
+        padding-left: 10px;
+      }
+      .article-aside .toc-item.active {
+        color: var(--accent);
+        border-left-color: var(--accent);
+      }
+      .article-aside .toc-num { color: var(--ink-faint); }
+      .article-aside .actions {
+        margin-top: 28px;
+        display: grid;
+        gap: 8px;
+      }
+      .article-aside .actions a {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        text-decoration: none;
+        color: var(--ink-muted);
+        padding: 8px 0;
+        border-top: 1px dashed var(--rule);
+        display: flex;
+        justify-content: space-between;
+      }
+      .article-aside .actions a:hover { color: var(--accent); }
+
+      /* ============== workflow detail mock ============== */
+      .wf-hero {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 28px;
+        padding-bottom: 24px;
+        border-bottom: 1px solid var(--rule);
+      }
+      .wf-hero .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      .wf-hero h1 {
+        font-family: var(--font-display);
+        font-style: italic;
+        font-weight: 300;
+        font-size: 68px;
+        line-height: 0.95;
+        letter-spacing: -0.02em;
+        margin: 8px 0 0;
+        color: var(--ink);
+      }
+      .wf-hero .deck {
+        font-family: var(--font-display);
+        font-size: 18px;
+        font-style: italic;
+        color: var(--ink-muted);
+        margin: 14px 0 0;
+        line-height: 1.45;
+        max-width: 56ch;
+      }
+      .wf-hero .actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 20px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 16px;
+        border: 1px solid var(--ink-muted);
+        background: transparent;
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: lowercase;
+        text-decoration: none;
+        cursor: pointer;
+        transition: border-color .15s ease, color .15s ease, background .15s ease;
+      }
+      .btn:hover { border-color: var(--accent); color: var(--accent); }
+      .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--canvas); }
+      .btn.primary:hover { background: transparent; color: var(--accent); }
+      .btn.danger:hover { border-color: var(--failed); color: var(--failed); }
+
+      .wf-hero .panel {
+        background: var(--paper);
+        border: 1px solid var(--rule);
+        padding: 18px 22px;
+      }
+      .wf-hero .panel-body {
+        display: flex;
+        gap: 36px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+      }
+      .wf-hero .panel-spark-col { flex: 1; min-width: 220px; }
+      .wf-hero .panel h3 {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--ink-muted);
+        margin: 0 0 12px;
+      }
+      .wf-hero .stat-stack {
+        display: flex;
+        gap: 28px;
+        font-family: var(--font-mono);
+        font-size: 12.5px;
+        flex-wrap: wrap;
+      }
+      .wf-hero .stat-stack .row {
+        display: grid;
+        grid-template-columns: auto;
+        gap: 2px;
+      }
+      .wf-hero .stat-stack .row .lbl {
+        color: var(--ink-muted);
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+      .wf-hero .stat-stack .row > span:last-child {
+        font-family: var(--font-display);
+        font-size: 24px;
+        color: var(--ink);
+        line-height: 1;
+        font-weight: 400;
+        font-feature-settings: "lnum", "ss01";
+      }
+      .wf-hero .spark {
+        height: 44px;
+        display: flex;
+        align-items: flex-end;
+        gap: 3px;
+        min-width: 220px;
+      }
+      .wf-hero .spark .bar {
+        flex: 1;
+        height: 18px;
+        background: var(--ok);
+        opacity: 0.5;
+      }
+      .wf-hero .spark .bar.tall  { height: 36px; background: var(--ok); opacity: 0.85; }
+      .wf-hero .spark .bar.fail  { height: 28px; background: var(--failed); }
+      .wf-hero .spark .bar.warm  { height: 30px; background: var(--accent-warm); opacity: 0.7; }
+
+      .wf-tabs {
+        display: flex;
+        gap: 24px;
+        margin-top: 24px;
+        border-bottom: 1px solid var(--rule);
+      }
+      .wf-tabs a {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        text-decoration: none;
+        color: var(--ink-muted);
+        padding: 14px 0;
+        position: relative;
+      }
+      .wf-tabs a.active { color: var(--ink); }
+      .wf-tabs a.active::after {
+        content: "";
+        position: absolute;
+        left: 0; right: 0; bottom: -1px;
+        height: 2px;
+        background: var(--accent);
+      }
+      .wf-tabs a:hover { color: var(--ink); }
+      .wf-tabs .right-tab { margin-left: auto; }
+
+      .wf-runs {
+        margin-top: 8px;
+      }
+      .wf-run-card {
+        position: relative;
+        display: block;
+        padding: 18px 0 18px 20px;
+        border-bottom: 1px solid var(--rule);
+        text-decoration: none;
+        color: inherit;
+        transition: background .15s ease;
+      }
+      .wf-run-card:hover { background: var(--paper); }
+      .wf-run-card::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 24px; bottom: 24px;
+        width: 2px;
+        background: var(--ok);
+      }
+      .wf-run-card[data-status="failed"]::before { background: var(--failed); }
+      .wf-run-card .kicker {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .wf-run-card .kicker .s { color: var(--ok); letter-spacing: 0.18em; text-transform: uppercase; }
+      .wf-run-card .kicker .sep { color: var(--ink-faint); }
+      .wf-run-card .head-row {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        margin-top: 6px;
+      }
+      .wf-run-card .title {
+        font-family: var(--font-display);
+        font-size: 22px;
+        line-height: 1.2;
+        color: var(--ink);
+        margin: 0;
+      }
+      .wf-run-card .arrow {
+        font-family: var(--font-mono);
+        font-size: 15px;
+        color: var(--ink-muted);
+        transition: color .15s ease, transform .15s ease;
+      }
+      .wf-run-card:hover .title { color: var(--accent); }
+      .wf-run-card:hover .arrow { color: var(--accent); transform: translateX(3px); }
+      .wf-run-card .body {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        color: var(--ink);
+        line-height: 1.55;
+        margin-top: 6px;
+        max-width: 72ch;
+      }
+
+      /* ============== run detail mock ============== */
+      .run-hero {
+        position: relative;
+        padding: 0 0 22px 28px;
+      }
+      .run-hero::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 14px; bottom: 14px;
+        width: 4px;
+        background: var(--ok);
+      }
+      .run-hero[data-status="failed"]::before { background: var(--failed); }
+      .run-hero[data-status="running"]::before { background: var(--running); }
+      .run-hero .crumb {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--ink-muted);
+      }
+      .run-hero .crumb a { color: var(--ink-muted); text-decoration: none; }
+      .run-hero .crumb a:hover { color: var(--accent); }
+      .run-hero .crumb .sep { color: var(--ink-faint); margin: 0 8px; }
+      .run-hero h1.run-title {
+        font-family: var(--font-display);
+        font-style: italic;
+        font-weight: 300;
+        font-size: 56px;
+        line-height: 0.98;
+        letter-spacing: -0.02em;
+        margin: 12px 0 0;
+        color: var(--ink);
+      }
+      .run-hero .verdict-meta {
+        margin-top: 16px;
+        display: flex;
+        gap: 28px;
+        flex-wrap: wrap;
+        align-items: baseline;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+      }
+      .run-hero .verdict-meta b { color: var(--ink); font-weight: 500; }
+      .run-hero .verdict-meta .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 2px 8px;
+        border: 1px solid var(--ok);
+        color: var(--ok);
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        font-size: 10px;
+      }
+      .run-hero[data-status="failed"] .verdict-meta .status-pill { border-color: var(--failed); color: var(--failed); }
+
+      /* Summary block — renders the full run.summary markdown at body size,
+         directly under the hero. NOT a peer section to Published / Inputs /
+         Activity (those have H2 labels because they contain lists or tables).
+         The summary is narrative content belonging to the hero, no heading. */
+      .run-summary {
+        margin-top: 28px;
+        max-width: 76ch;
+      }
+      .run-summary p {
+        margin: 0 0 14px;
+        font-family: var(--font-mono);
+        font-size: 14px;
+        line-height: 1.7;
+        color: var(--ink);
+      }
+      .run-summary p:last-child { margin-bottom: 0; }
+      .run-summary strong {
+        font-family: var(--font-display);
+        font-weight: 500;
+        color: var(--ink);
+        font-size: 1.04em;
+        line-height: 1.4;
+      }
+      .run-summary a {
+        color: var(--accent);
+        text-decoration: none;
+        border-bottom: 1px dotted var(--accent-deep);
+      }
+      .run-summary a:hover { color: var(--ink); border-bottom-color: var(--ink-muted); }
+      .run-summary code {
+        font-family: var(--font-mono);
+        font-size: 0.92em;
+        background: var(--paper);
+        padding: 1px 6px;
+        border-radius: 2px;
+      }
+      .run-summary h2 {
+        font-family: var(--font-display);
+        font-size: 18px;
+        margin: 20px 0 8px;
+        color: var(--ink);
+        font-weight: 500;
+      }
+      .run-summary ul, .run-summary ol {
+        margin: 12px 0 14px;
+        padding-left: 22px;
+        font-family: var(--font-mono);
+      }
+      .run-summary li {
+        margin: 6px 0;
+        line-height: 1.7;
+        font-size: 14px;
+        color: var(--ink);
+      }
+      .run-summary li::marker { color: var(--ink-muted); }
+
+      .run-stat-strip {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0;
+        margin-top: 32px;
+        border-top: 1px solid var(--rule);
+        border-bottom: 1px solid var(--rule);
+      }
+      .run-stat-strip .cell {
+        padding: 18px 22px;
+        border-left: 1px solid var(--rule);
+      }
+      .run-stat-strip .cell:first-child { border-left: 0; }
+      .run-stat-strip .num {
+        font-family: var(--font-display);
+        font-size: 44px;
+        line-height: 0.95;
+        font-weight: 300;
+        color: var(--ink);
+        font-feature-settings: "lnum", "ss01";
+        letter-spacing: -0.02em;
+      }
+      .run-stat-strip .num.accent { color: var(--accent); }
+      .run-stat-strip .num.failed { color: var(--failed); }
+      .run-stat-strip .num.muted { color: var(--ink-muted); }
+      .run-stat-strip .lbl {
+        margin-top: 8px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--ink-muted);
+      }
+
+      .run-section {
+        margin-top: 40px;
+      }
+      .run-section-head {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: baseline;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--rule);
+        margin-bottom: 12px;
+      }
+      .run-section-head h2 {
+        font-family: var(--font-display);
+        font-size: 24px;
+        font-weight: 400;
+        margin: 0;
+        color: var(--ink);
+      }
+      .run-section-head .meta {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+      }
+
+      .published-hero {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 18px;
+        padding: 20px 22px;
+        border: 1px solid var(--accent);
+        background: linear-gradient(135deg, rgba(214, 184, 90, 0.06), rgba(214, 184, 90, 0.02));
+        text-decoration: none;
+        color: inherit;
+        transition: border-color .15s ease, background .15s ease;
+      }
+      .published-hero:hover { background: rgba(214, 184, 90, 0.08); }
+      .published-hero .icon {
+        width: 44px; height: 44px;
+        border: 1px solid var(--accent);
+        display: grid;
+        place-items: center;
+        font-family: var(--font-display);
+        font-size: 22px;
+        color: var(--accent);
+        font-style: italic;
+      }
+      .published-hero .ph-eyebrow {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      .published-hero .ph-title {
+        font-family: var(--font-display);
+        font-size: 22px;
+        line-height: 1.2;
+        color: var(--ink);
+        margin-top: 4px;
+      }
+      .published-hero .ph-sub {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+        margin-top: 4px;
+      }
+      .published-hero .arrow {
+        font-family: var(--font-mono);
+        font-size: 22px;
+        color: var(--accent);
+      }
+
+      .activity-table {
+        margin-top: 8px;
+        border: 1px solid var(--rule);
+      }
+      .activity-row {
+        display: grid;
+        grid-template-columns: 36px 90px 1fr 70px 60px 20px;
+        align-items: center;
+        gap: 14px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--rule);
+        font-family: var(--font-mono);
+        font-size: 12.5px;
+      }
+      .activity-row:last-child { border-bottom: 0; }
+      .activity-row .ord { color: var(--ink-faint); }
+      .activity-row .kind { color: var(--ink-muted); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; }
+      .activity-row .name { color: var(--ink); }
+      .activity-row .dur { color: var(--ink-muted); text-align: right; }
+      .activity-row .s {
+        font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+        color: var(--ok);
+      }
+      .activity-row .chev { color: var(--ink-faint); text-align: right; }
+      .activity-row.running .s { color: var(--running); }
+      .activity-row.pending { opacity: 0.55; }
+      .activity-row .progress {
+        position: relative;
+        height: 2px;
+        background: var(--rule);
+        grid-column: 1 / -1;
+        margin-top: 4px;
+      }
+      .activity-row .progress::after {
+        content: "";
+        position: absolute; left: 0; top: 0; bottom: 0;
+        width: 65%;
+        background: var(--running);
+        animation: prog 1.4s ease-in-out infinite alternate;
+      }
+      @keyframes prog { from { opacity: 0.4; } to { opacity: 1; } }
+
+      /* ============== tokens reference ============== */
+      .tokens {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 16px;
+        margin-top: 32px;
+      }
+      .swatch {
+        border: 1px solid var(--rule);
+        background: var(--paper);
+      }
+      .swatch .chip {
+        height: 64px;
+      }
+      .swatch .meta {
+        padding: 10px 12px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+      }
+      .swatch .meta b { color: var(--ink); font-weight: 500; display: block; margin-bottom: 2px; }
+
+      .type-scale {
+        display: grid;
+        grid-template-columns: 120px 1fr;
+        gap: 24px;
+        margin-top: 28px;
+      }
+      .type-scale .lbl {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--ink-muted);
+        padding-top: 14px;
+      }
+      .type-scale .demo {
+        padding: 12px 0;
+        border-top: 1px solid var(--rule);
+      }
+      .type-scale .demo.first { border-top: 0; }
+      .ts-1 { font-family: var(--font-display); font-style: italic; font-weight: 300; font-size: 96px; line-height: 0.95; letter-spacing: -0.02em; }
+      .ts-2 { font-family: var(--font-display); font-style: italic; font-weight: 300; font-size: 64px; line-height: 0.95; letter-spacing: -0.02em; }
+      .ts-3 { font-family: var(--font-display); font-weight: 400; font-size: 36px; line-height: 1.15; }
+      .ts-4 { font-family: var(--font-display); font-weight: 400; font-size: 22px; line-height: 1.3; }
+      .ts-5 { font-family: var(--font-display); font-style: italic; font-size: 18px; color: var(--ink-muted); line-height: 1.45; }
+      .ts-6 { font-family: var(--font-mono); font-size: 14px; line-height: 1.6; }
+      .ts-7 { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-muted); }
+
+      /* footer */
+      .doc-footer {
+        margin-top: 96px;
+        padding-top: 32px;
+        border-top: 1px solid var(--rule);
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 24px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-muted);
+      }
+      .doc-footer .lockup {
+        font-family: var(--font-display);
+        font-style: italic;
+        font-size: 28px;
+        color: var(--ink);
+        letter-spacing: -0.01em;
+      }
+
+      /* page-break helper for printing thoughts */
+      @media print {
+        body::before { display: none; }
+        .frame { break-inside: avoid; }
+      }
+
+      @media (max-width: 1100px) {
+        .shell, .article-shell { grid-template-columns: 1fr; gap: 32px; }
+        .doc-toc { grid-template-columns: repeat(2, 1fr); }
+        .critique { grid-template-columns: 1fr; }
+        .wf-hero { grid-template-columns: 1fr; }
+        .run-stat-strip { grid-template-columns: repeat(2, 1fr); }
+        .feed-row.rollup .rollup-list { grid-template-columns: 1fr; }
+        .tokens { grid-template-columns: repeat(3, 1fr); }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="doc">
+      <!-- =========================================================
+           document masthead
+           ========================================================= -->
+      <header class="doc-masthead">
+        <div>
+          <div class="eyebrow">A design audit · v0.20.0</div>
+          <h1>kiri,&nbsp;but&nbsp;louder.</h1>
+        </div>
+        <div class="colophon">
+          <b>Critique &amp; concept mocks</b><br />
+          for the local.kiri.build SPA<br />
+          v2 · grounded to the data model<br />
+          drafted Wed, 27 May
+        </div>
+      </header>
+
+      <nav class="doc-toc">
+        <a href="#critique">
+          <span class="toc-num">§ 01</span>
+          <span class="toc-label">The critique</span>
+          <span class="toc-sub">what's working, what isn't</span>
+        </a>
+        <a href="#feed">
+          <span class="toc-num">§ 02</span>
+          <span class="toc-label">The day&rsquo;s console</span>
+          <span class="toc-sub">activity feed, reimagined</span>
+        </a>
+        <a href="#article">
+          <span class="toc-num">§ 03</span>
+          <span class="toc-label">Markdown, set well</span>
+          <span class="toc-sub">articles as workflow output</span>
+        </a>
+        <a href="#workflow">
+          <span class="toc-num">§ 04</span>
+          <span class="toc-label">Workflow as control</span>
+          <span class="toc-sub">history before definition</span>
+        </a>
+      </nav>
+
+      <!-- =========================================================
+           § 01 — the critique
+           ========================================================= -->
+      <section class="section" id="critique">
+        <div class="section-eyebrow">§ 01 · The critique</div>
+        <h2 class="section-title">A workday console with editorial polish.</h2>
+        <p class="section-deck">
+          Kiri isn&rsquo;t a periodical &mdash; it&rsquo;s how you run and read your
+          workday. The editorial palette and serif&nbsp;/&nbsp;mono pairing should stay; the
+          chrome around them needs to feel like a calm operator&rsquo;s surface,
+          not a magazine. What follows critiques the current SPA against
+          that posture and against the data Kiri actually stores.
+        </p>
+
+        <div class="critique">
+          <article class="crit">
+            <span class="verdict keep">Keep</span>
+            <h4>The editorial palette</h4>
+            <p>Cream-on-black with the warm gold is uncommon and instantly identifiable. It reads as a thoughtful tool, not a SaaS dashboard.</p>
+          </article>
+          <article class="crit">
+            <span class="verdict keep">Keep</span>
+            <h4>Fraunces + JetBrains Mono</h4>
+            <p>The serif/mono pairing is doing real work &mdash; Fraunces&rsquo; optical sizing and italic give you a wide register to play with. You&rsquo;re not using its full range yet.</p>
+          </article>
+
+          <article class="crit">
+            <span class="verdict rework">Rework</span>
+            <h4>The feed is a monotone list</h4>
+            <p>&ldquo;Dev / Patch · Dev / Patch · Dev / Patch &hellip;&rdquo; five times in a row, all in the same display type at the same size. The eye finds nothing to land on. Consecutive runs of the same workflow should collapse into one entry whose children are the actual run summaries.</p>
+          </article>
+          <article class="crit">
+            <span class="verdict rework">Rework</span>
+            <h4>No sense of when</h4>
+            <p>Run rows mix &ldquo;1 hour ago&rdquo; with &ldquo;yesterday&rdquo; with &ldquo;2 days ago&rdquo; in one continuous strip. Date dividers (driven by <code>startedAt</code>) give the feed an at-a-glance structure without inventing anything.</p>
+          </article>
+
+          <article class="crit">
+            <span class="verdict lift">Lift</span>
+            <h4>The status strip is your motif. Use it more.</h4>
+            <p>That 2px coloured strip is the one bit of chrome unique to Kiri. Wear it at full volume on the run hero (4px), as dots in the sidebar, on workflow run cards, and on the activity table. Make it the through-line.</p>
+          </article>
+          <article class="crit">
+            <span class="verdict lift">Lift</span>
+            <h4>Use the gold more bravely</h4>
+            <p>#d6b85a barely appears outside hover states. Promote it to: drop caps on article first paragraphs, section eyebrows, the &ldquo;Published&rdquo; affordance on run pages, active sidebar accents. Stop hiding the only colour you&rsquo;ve committed to.</p>
+          </article>
+
+          <article class="crit">
+            <span class="verdict rework">Rework</span>
+            <h4>Workflow page leads with the code</h4>
+            <p>Opening a workflow drops you onto a 200-line YAML dump. The thing you almost always want is &ldquo;what did it last do, and is it healthy?&rdquo; Promote recent runs and a duration sparkline above the definition.</p>
+          </article>
+          <article class="crit">
+            <span class="verdict rework">Rework</span>
+            <h4>Articles render as sparse markdown</h4>
+            <p>Digests and patch reports are <em>just markdown</em> &mdash; that&rsquo;s deliberately the only contract. So the job is to set that markdown beautifully: a real H1 lockup, drop cap on the first paragraph, generous line lengths, an auto-derived H2 table of contents in the margin, and stronger list rhythm. <em>Do not</em> invent structured fields the data doesn&rsquo;t carry.</p>
+          </article>
+
+          <article class="crit">
+            <span class="verdict rework">Rework</span>
+            <h4>Run header buries its outcome</h4>
+            <p>The hero repeats the workflow name (which you just clicked on). The <code>run.summary</code> markdown <em>is</em> what happened &mdash; promote it from a section in the body to the hero line, set in editorial type. Workflow name demotes to a breadcrumb.</p>
+          </article>
+          <article class="crit">
+            <span class="verdict lift">Lift</span>
+            <h4>The right rail is duplicative</h4>
+            <p>&ldquo;Recently Published&rdquo; just mirrors the feed&rsquo;s articles. Replace with something the feed <em>can&rsquo;t</em> show with first-class data: pending recommendations across all runs, in-flight runs, and today&rsquo;s failed runs needing attention.</p>
+          </article>
+
+          <article class="crit">
+            <span class="verdict lift">Lift</span>
+            <h4>The wordmark is a whisper</h4>
+            <p>&ldquo;kiri&rdquo; sits alone in the corner. Add a small live status line beneath it (in-flight count, today&rsquo;s run total, the version), and keep the wordmark tall &mdash; it&rsquo;s the only identity moment in the chrome.</p>
+          </article>
+          <article class="crit">
+            <span class="verdict lift">Lift</span>
+            <h4>The sidebar workflows are a flat list</h4>
+            <p>Nine entries with <code>/</code> separators. Lean into the natural grouping (<code>Dev</code>, <code>News</code>, <code>BPP</code>) and add a tiny status dot + last-run mono tail beside each name. Same information, ten times the scannability.</p>
+          </article>
+        </div>
+
+        <h3 style="font-family: var(--font-display); font-style: italic; font-size: 28px; margin: 48px 0 8px; font-weight: 400;">
+          Self-audit &mdash; what this document&apos;s v1 mocks invented.
+        </h3>
+        <p class="section-deck" style="font-size: 14.5px; max-width: 60ch; font-style: normal; font-family: var(--font-mono); color: var(--ink-muted);">
+          A first pass leaned on a &ldquo;personal newspaper&rdquo; framing and drew structured
+          fields Kiri doesn&rsquo;t store. The inventions are listed below so future iterations
+          don&rsquo;t repeat them. Articles are <em>only</em> published markdown; that contract is
+          load-bearing and isn&rsquo;t changing.
+        </p>
+
+        <div class="critique" style="margin-top: 24px;">
+          <article class="crit">
+            <span class="verdict rework">Cut</span>
+            <h4>The periodical metaphor</h4>
+            <p><code>Vol.&nbsp;1 · No.&nbsp;147</code> wordmark meta, &ldquo;Today.&rdquo; display masthead, &ldquo;edition closed · 21:00&rdquo; &mdash; Kiri isn&rsquo;t a daily issue. The wordmark gets a quiet live-status line instead.</p>
+          </article>
+          <article class="crit">
+            <span class="verdict rework">Cut</span>
+            <h4>Verdict stamps on PR-review rows</h4>
+            <p>&ldquo;Approve with nits&rdquo; only exists if the run&rsquo;s summary mentions it. There&rsquo;s no <code>verdict</code> field. The PR card embed (<code>#1045 · join-flex · &hellip;</code>) likewise treated an external PR as a Kiri entity. Both go.</p>
+          </article>
+
+          <article class="crit">
+            <span class="verdict rework">Cut</span>
+            <h4>Stat strips on articles &amp; runs</h4>
+            <p>&ldquo;2 advisories patched · 0 skipped · 78 tests passing · 1 PR opened&rdquo; rendered as a 4-cell stat lockup. None of those are fields; they only appear in the summarizer&rsquo;s prose. The same goes for the 84-pt &ldquo;0 / 1&rdquo; on Open-PR runs.</p>
+          </article>
+          <article class="crit">
+            <span class="verdict rework">Cut</span>
+            <h4>CVE / severity tags &amp; story cards</h4>
+            <p>Patch articles were drawn as &ldquo;High · CVE-2025-37132&rdquo; cards. Digest articles were drawn as per-story cards with a pull quote. Articles are markdown; render the markdown well, don&rsquo;t parse it into pretend structures.</p>
+          </article>
+
+          <article class="crit">
+            <span class="verdict rework">Cut</span>
+            <h4>Invented run-detail verdict hero</h4>
+            <p>&ldquo;Patched 2 advisories, opened PR #79.&rdquo; was a sentence I typed. The real <code>run.summary</code> is &ldquo;<em>autoid-verify-service patched 2 advisories with 0 skipped at &hellip;</em>&rdquo; &mdash; that markdown should render in the hero in editorial type.</p>
+          </article>
+          <article class="crit">
+            <span class="verdict rework">Cut</span>
+            <h4>Workflow &ldquo;this week&rdquo; faux stats</h4>
+            <p>&ldquo;Advisories patched · 31&rdquo; / &ldquo;PRs opened · 15&rdquo; aren&rsquo;t fields. The week panel can show only what runs carry: count, status breakdown, average duration, and the duration sparkline.</p>
+          </article>
+        </div>
+      </section>
+
+      <!-- =========================================================
+           § 02 — feed mock
+           ========================================================= -->
+      <section class="section" id="feed">
+        <div class="section-eyebrow">§ 02 · Mockup</div>
+        <h2 class="section-title">The daily edition.</h2>
+        <p class="section-deck">
+          A periodical you scan, not a log you scroll. Date dividers, a day-brief,
+          differentiated treatments per workflow type, and identical-workflow
+          runs collapsed into one entry.
+        </p>
+
+        <div class="frame">
+          <span class="frame-tag">Mock · Home feed</span>
+
+          <div class="shell">
+            <!-- sidebar -->
+            <aside class="side">
+              <h1 class="wordmark">kiri</h1>
+              <div class="wordmark-meta">
+                <span style="display: inline-flex; align-items: center; gap: 6px;"><span class="dot ok" style="width: 6px; height: 6px; border-radius: 50%; background: var(--ok); display: inline-block;"></span><b>22&nbsp;runs · 0&nbsp;failed</b></span><br />
+                v0.20.0 · Wed, 27 May
+              </div>
+
+              <div class="side-section">
+                <h2>Workflows</h2>
+                <ul>
+                  <div class="group-label">Dev</div>
+                  <li><a href="#"><span class="dot ok"></span><span>GitHub Security Audit</span><span class="tail">5h</span></a></li>
+                  <li><a href="#"><span class="dot ok"></span><span>Open PRs</span><span class="tail">10h</span></a></li>
+                  <li><a class="active" href="#"><span class="dot ok"></span><span>Patch</span><span class="tail">1h</span></a></li>
+                  <li><a href="#"><span class="dot ok"></span><span>PR Review</span><span class="tail">10h</span></a></li>
+
+                  <div class="group-label">News</div>
+                  <li><a href="#"><span class="dot ok"></span><span>Dev</span><span class="tail">13h</span></a></li>
+                  <li><a href="#"><span class="dot ok"></span><span>Finance</span><span class="tail">1d</span></a></li>
+                  <li><a href="#"><span class="dot running"></span><span>Tech</span><span class="tail">now</span></a></li>
+                  <li><a href="#"><span class="dot ok"></span><span>World</span><span class="tail">2d</span></a></li>
+
+                  <div class="group-label">BPP</div>
+                  <li><a href="#"><span class="dot ok"></span><span>Team Recap</span><span class="tail">14h</span></a></li>
+                </ul>
+              </div>
+
+              <div class="side-section">
+                <h2>Docs</h2>
+                <ul>
+                  <li><a href="#"><span></span><span>Documentation</span><span></span></a></li>
+                  <li><a href="#"><span></span><span>GitHub ↗</span><span></span></a></li>
+                </ul>
+              </div>
+
+              <div class="version">
+                <b>v0.20.0 ·</b> Releases ↗
+              </div>
+            </aside>
+
+            <!-- main -->
+            <section class="main">
+              <header class="main-masthead">
+                <div class="left">
+                  <div class="eyebrow">Activity</div>
+                  <h1>Today</h1>
+                </div>
+                <div class="right">
+                  <div class="date">Wednesday, 27&nbsp;May 2026</div>
+                  <div>21:04 local · live</div>
+                </div>
+              </header>
+
+              <div class="day-brief">
+                <div class="label">today</div>
+                <div class="stats">
+                  <span><span class="num">22</span>runs</span>
+                  <span><span class="num pos">22</span>ok</span>
+                  <span><span class="num">0</span>failed</span>
+                  <span><span class="num">9</span>articles published</span>
+                  <span><span class="num">3</span>recommendations</span>
+                </div>
+                <div class="label">first run · 06:12</div>
+              </div>
+
+              <!-- today -->
+              <div class="day-divider">
+                <h3>Today</h3>
+                <div class="rule"></div>
+              </div>
+
+              <!-- ROLL-UP: 3 consecutive Dev / Patch runs collapsed into one entry.
+                   Header is workflow + adjacency (real); each child shows that run's
+                   actual summary text (real markdown). No invented aggregate stats. -->
+              <div class="feed-row rollup" data-status="ok">
+                <div class="kicker">
+                  <span class="status">3 runs · ok</span>
+                  <span class="dotsep">·</span><span>this morning</span>
+                  <span class="dotsep">·</span><span>9m 57s total</span>
+                </div>
+                <a href="#" class="head">
+                  Dev / Patch
+                  <span class="arrow">→</span>
+                </a>
+
+                <div class="rollup-list" style="grid-template-columns: 1fr;">
+                  <a class="rollup-item" href="#" style="grid-template-columns: auto 1fr auto auto;">
+                    <span class="ri-status"></span>
+                    <span><span class="ri-repo">autoid-verify-service</span> <span class="ri-meta">patched 2 advisories with 0 skipped at <span class="ri-pr">PR&nbsp;#79</span>.</span></span>
+                    <span class="ri-meta">1&nbsp;h ago</span>
+                    <span class="ri-meta">3m&nbsp;33s</span>
+                  </a>
+                  <a class="rollup-item" href="#" style="grid-template-columns: auto 1fr auto auto;">
+                    <span class="ri-status"></span>
+                    <span><span class="ri-repo">document-storage-service</span> <span class="ri-meta">patched 2 code-scanning advisories (both unpinned GitHub Action tags) with <span class="ri-pr">PR&nbsp;#201</span>, skipping no advisories.</span></span>
+                    <span class="ri-meta">1&nbsp;h ago</span>
+                    <span class="ri-meta">3m</span>
+                  </a>
+                  <a class="rollup-item" href="#" style="grid-template-columns: auto 1fr auto auto;">
+                    <span class="ri-status"></span>
+                    <span><span class="ri-repo">join-external-application-adapter</span> <span class="ri-meta">patched 3 advisories and skipped 1, opening <span class="ri-pr">PR&nbsp;#116</span>.</span></span>
+                    <span class="ri-meta">1&nbsp;h ago</span>
+                    <span class="ri-meta">3m&nbsp;24s</span>
+                  </a>
+                </div>
+              </div>
+
+              <!-- PR REVIEW: just the run.summary markdown rendered well. -->
+              <div class="feed-row" data-status="ok">
+                <div class="kicker">
+                  <span class="status">ok</span>
+                  <span class="dotsep">·</span><span>10 hours ago</span>
+                  <span class="dotsep">·</span><span>4m 40s</span>
+                </div>
+                <a href="#" class="head">
+                  Dev / PR Review
+                  <span class="arrow">→</span>
+                </a>
+                <div class="body">
+                  <b style="color: var(--ink); font-family: var(--font-display); font-weight: 500;"><a href="#">BPP-Education-Group/join-flex #1045</a> reviewed &mdash; Approve with nits.</b>
+                  Small, focused diff adding two mutually-exclusive
+                  <code style="font-family: var(--font-mono); background: var(--paper); padding: 0 4px; border-radius: 2px;">applicationStageChanged</code>
+                  event triggers on LMR completion. Predicates are tight and wire shape matches existing
+                  patterns. <b style="color: var(--ink);">Main concern:</b>
+                  no-changes path emits the Salesforce event but doesn&rsquo;t update the local application
+                  stage &mdash; compare with sibling triggers that pair event + stage update + activity write.
+                </div>
+
+                <div class="articles">
+                  <a class="article" href="#">
+                    <span>
+                      <span class="a-title">Pull Request Review</span>
+                      <span class="a-sub">BPP-Education-Group/join-flex &mdash; feat(apprenticeship-schema): emit applicationStageChanged on LMR completion (#1045)</span>
+                    </span>
+                    <span class="a-arrow">→</span>
+                  </a>
+                </div>
+              </div>
+
+              <!-- DIGEST: workflow name as headline + the real run.summary markdown.
+                   The published article is offered as a stacked sub-link. -->
+              <div class="feed-row" data-status="ok">
+                <div class="kicker">
+                  <span class="status">ok</span>
+                  <span class="dotsep">·</span><span>13 hours ago</span>
+                  <span class="dotsep">·</span><span>2m 6s</span>
+                </div>
+                <a href="#" class="head">
+                  News / Dev
+                  <span class="arrow">→</span>
+                </a>
+                <div class="body">
+                  <b style="color: var(--ink); font-family: var(--font-display); font-weight: 500;">47 dev news items aggregated from 8 feeds</b> (Lobsters, HN, Simon Willison, Pragmatic Engineer, InfoQ, Import AI, GitHub Blog, Hugging Face). Top narrative: AI is a dual force &mdash; amplifier for finding (and creating) vulnerabilities, force multiplier for both attack and defence.
+                </div>
+
+                <div class="articles">
+                  <a class="article" href="#">
+                    <span>
+                      <span class="a-title">Dev News Digest</span>
+                      <span class="a-sub">What stood out</span>
+                    </span>
+                    <span class="a-arrow">→</span>
+                  </a>
+                </div>
+              </div>
+
+              <!-- Open PRs: standard row, just the run.summary text. -->
+              <div class="feed-row" data-status="ok">
+                <div class="kicker">
+                  <span class="status">ok</span>
+                  <span class="dotsep">·</span><span>10 hours ago</span>
+                  <span class="dotsep">·</span><span>12s</span>
+                </div>
+                <a href="#" class="head">
+                  Dev / Open PRs
+                  <span class="arrow">→</span>
+                </a>
+                <div class="body">
+                  1 open PR across 1 repository: 0 awaiting Lee&rsquo;s review and 1 opened by Lee.
+                </div>
+                <div class="articles">
+                  <a class="article" href="#">
+                    <span>
+                      <span class="a-title">Open PRs</span>
+                    </span>
+                    <span class="a-arrow">→</span>
+                  </a>
+                </div>
+              </div>
+
+              <!-- yesterday -->
+              <div class="day-divider">
+                <h3>Yesterday</h3>
+                <div class="rule"></div>
+              </div>
+
+              <div class="feed-row" data-status="ok">
+                <div class="kicker">
+                  <span class="status">ok</span>
+                  <span class="dotsep">·</span><span>yesterday · 18:42</span>
+                  <span class="dotsep">·</span><span>3m 6s</span>
+                </div>
+                <a href="#" class="head">
+                  Dev / PR Review
+                  <span class="arrow">→</span>
+                </a>
+                <div class="body">
+                  <b style="color: var(--ink); font-family: var(--font-display); font-weight: 500;"><a href="#">BPP-Education-Group/join-flex #1036</a>: Approve with nits.</b>
+                  Clean migration to the new JAS event shape with good test coverage, but
+                  two schema changes weaken upfront validation. Suggested a
+                  <code style="font-family: var(--font-mono); background: var(--paper); padding: 0 4px; border-radius: 2px;">.refine()</code>
+                  to restore the agent-led path&rsquo;s rejection and a narrower row builder.
+                </div>
+                <div class="articles">
+                  <a class="article" href="#">
+                    <span>
+                      <span class="a-title">Pull Request Review</span>
+                      <span class="a-sub">BPP-Education-Group/join-flex &mdash; fix: consume lineManagerApplicationUpdated, project schemas (#1036)</span>
+                    </span>
+                    <span class="a-arrow">→</span>
+                  </a>
+                </div>
+              </div>
+
+              <div class="feed-row" data-status="ok">
+                <div class="kicker">
+                  <span class="status">ok</span>
+                  <span class="dotsep">·</span><span>yesterday · 17:10</span>
+                  <span class="dotsep">·</span><span>2m 44s</span>
+                </div>
+                <a href="#" class="head">
+                  Applications team recap &mdash; May&nbsp;26
+                  <span class="arrow">→</span>
+                </a>
+                <div class="body">
+                  Heavy delivery on apprenticeship-eligibility, line-manager event alignment,
+                  and option-hints porting. You merged 6 PRs (join-flex and
+                  join-application-service); @djejlan-bpp cleared 7. 15 jira tickets touched.
+                </div>
+              </div>
+
+            </section>
+
+            <!-- right rail: operator surfaces that the centre feed can't easily show.
+                 (a) Recommendations queue — RecommendationSummary across all runs.
+                 (b) In-flight — runs with status='running'.
+                 (c) Attention — non-ok runs not yet acted on. -->
+            <aside class="rail">
+              <h2>Recommendations · 3</h2>
+              <a class="digest-card" href="#" style="text-decoration: none; display: block;">
+                <div class="a-eyebrow">From GitHub Security Audit</div>
+                <div class="a-title">Patch join-application-service</div>
+                <div class="a-meta">4 open alerts · Dev / Patch · run →</div>
+              </a>
+              <a class="digest-card" href="#" style="text-decoration: none; display: block;">
+                <div class="a-eyebrow">From Open PRs</div>
+                <div class="a-title">Review join-flex #1043</div>
+                <div class="a-meta">awaiting your review · Dev / PR Review · run →</div>
+              </a>
+              <a class="digest-card" href="#" style="text-decoration: none; display: block;">
+                <div class="a-eyebrow">From Open PRs</div>
+                <div class="a-title">Review optimizely-management #88</div>
+                <div class="a-meta">awaiting your review · Dev / PR Review · run →</div>
+              </a>
+
+              <div class="rail-section">
+                <h2>In flight · 1</h2>
+                <ul class="agenda" style="padding: 0; margin: 0;">
+                  <li><span class="when"><span class="dot running" style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--running);"></span></span><span>News / Tech</span><span class="tag">0:42</span></li>
+                </ul>
+              </div>
+
+              <div class="rail-section">
+                <h2>Needs attention</h2>
+                <p style="font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-muted); margin: 0; line-height: 1.6;">
+                  <em>Nothing failed today.</em> Last failure was the cancelled run on 29 Apr.
+                </p>
+              </div>
+            </aside>
+          </div>
+
+          <div class="frame-caption">
+            <span class="pin">●</span><b>What changed &mdash; all backed by real fields.</b>
+            (1)&nbsp;Wordmark gets a quiet live status line beneath it &mdash; today&rsquo;s
+            run count and failure count, both derivable from <code>RunListEntry.status</code>.
+            (2)&nbsp;Sidebar workflows grouped by name prefix; status dot is each
+            workflow&rsquo;s most-recent run&rsquo;s <code>status</code>.
+            (3)&nbsp;A simple <em>Activity / Today</em> header replaces the previous &ldquo;Today.&rdquo;
+            display masthead. Day-brief stats are only what runs carry: count, ok, failed,
+            article count, open-recommendation count.
+            (4)&nbsp;Date dividers driven by <code>startedAt</code>.
+            (5)&nbsp;Roll-up of consecutive runs of the <em>same</em> workflow into one
+            entry &mdash; each child shows that run&rsquo;s actual <code>run.summary</code>
+            line, not an invented aggregate.
+            (6)&nbsp;Every feed row is now <em>kicker · workflow-name · run.summary · article links</em>.
+            No verdict stamps, no PR cards, no source-rail tags &mdash; the row is the summary
+            markdown, set well.
+            (7)&nbsp;Right rail trades the duplicative &ldquo;Recently Published&rdquo; list for three
+            operator surfaces: pending <code>recommendations</code> across all runs (real),
+            currently-running runs (real), and a needs-attention summary keyed on
+            non-ok runs (real).
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================================================
+           § 03 — article reading view mock
+           ========================================================= -->
+      <section class="section" id="article">
+        <div class="section-eyebrow">§ 03 · Mockup</div>
+        <h2 class="section-title">A real reading view.</h2>
+        <p class="section-deck">
+          The published surface is where Kiri earns the &ldquo;personal periodical&rdquo;
+          metaphor. Treat it like one: drop cap, deck, byline, marginalia table of
+          contents, embedded story cards, a pull quote, and a source rail at the foot.
+        </p>
+
+        <div class="frame">
+          <span class="frame-tag">Mock · Article reading view</span>
+
+          <div class="article-shell">
+            <!-- mini sidebar (same chrome as the home shell) -->
+            <aside class="side">
+              <h1 class="wordmark">kiri</h1>
+              <div class="wordmark-meta">
+                <span style="display: inline-flex; align-items: center; gap: 6px;"><span class="dot ok" style="width: 6px; height: 6px; border-radius: 50%; background: var(--ok); display: inline-block;"></span><b>22&nbsp;runs · 0&nbsp;failed</b></span><br />
+                v0.20.0 · Wed, 27 May
+              </div>
+              <div class="side-section">
+                <h2>Workflows</h2>
+                <ul>
+                  <div class="group-label">News</div>
+                  <li><a class="active" href="#"><span class="dot ok"></span><span>Dev</span><span class="tail">13h</span></a></li>
+                  <li><a href="#"><span class="dot ok"></span><span>Tech</span><span class="tail">1d</span></a></li>
+                  <li><a href="#"><span class="dot ok"></span><span>World</span><span class="tail">2d</span></a></li>
+                </ul>
+              </div>
+            </aside>
+
+            <!-- article: just the published markdown, set well. -->
+            <article class="article-main">
+              <div class="article-eyebrow">News / Dev</div>
+              <h1 class="article-h1">Dev News Digest</h1>
+              <p style="font-family: var(--font-display); font-size: 20px; font-style: italic; color: var(--ink-muted); margin: 8px 0 0; line-height: 1.4;">
+                What stood out
+              </p>
+
+              <div class="article-byline">
+                <div>
+                  From the run on <b>News / Dev</b> &middot;
+                  <time datetime="2026-05-27T08:00:00">13&nbsp;h ago</time> &middot;
+                  2m&nbsp;6s &middot; <code style="font-family: var(--font-mono); background: var(--paper); padding: 0 6px;">8c4d05c</code>
+                </div>
+                <div class="right">
+                  <a href="#" style="color: var(--accent); text-decoration: none;">open run ↗</a>
+                  <a href="#" style="color: var(--accent); text-decoration: none;">copy markdown</a>
+                </div>
+              </div>
+
+              <div class="article-body">
+                <h2><span class="num">§ 01</span>What stood out</h2>
+                <p>
+                  AI&rsquo;s rise as a force multiplier for attack and defence dominated today. The curl
+                  team is drowning in AI-assisted security disclosures &mdash; 4&ndash;5&times; the
+                  2024 rate, per day, higher quality than ever &mdash; while Microsoft shipped a
+                  Copilot agentic product with a prompt-injection flaw that lets attackers
+                  exfiltrate files straight to inboxes. At the same time, the Pragmatic Engineer&rsquo;s
+                  job-market deep-dive dropped, confirming what you&rsquo;re probably seeing:
+                  AI engineering is booming while traditional SE hiring shifts under it. Claude
+                  Code mastery guides, Pullfrog (open-source PR-review bot) and the Agent Trace
+                  RFC all arrived this morning.
+                </p>
+
+                <h2><span class="num">§ 02</span>Top stories</h2>
+                <ul style="margin: 16px 0; padding-left: 22px; list-style: disc; color: var(--ink-muted);">
+                  <li style="margin-bottom: 12px; line-height: 1.6; color: var(--ink);">
+                    <b style="font-family: var(--font-display); font-weight: 500;"><a href="#" style="color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent-deep);">State of the software-engineering job market in 2026</a></b>
+                    &mdash; <em style="color: var(--ink-muted);">Pragmatic Engineer.</em>
+                    Exclusive data on whether AI engineering is consolidating traditional SE
+                    hiring &mdash; the most concrete read on the market right now.
+                  </li>
+                  <li style="margin-bottom: 12px; line-height: 1.6; color: var(--ink);">
+                    <b style="font-family: var(--font-display); font-weight: 500;"><a href="#" style="color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent-deep);">Cloudflare flagged AI-assisted security reports</a></b>
+                    &mdash; <em style="color: var(--ink-muted);">Hacker News &middot; 203 points.</em>
+                    Cloudflare quietly launched something significant here; worth claiming the
+                    platform plus AI is the whole bug-disclosure stack now.
+                  </li>
+                  <li style="margin-bottom: 12px; line-height: 1.6; color: var(--ink);">
+                    <b style="font-family: var(--font-display); font-weight: 500;"><a href="#" style="color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent-deep);">Microsoft Copilot Cowork exfiltrates files via prompt injection</a></b>
+                    &mdash; <em style="color: var(--ink-muted);">Simon Willison &middot; 165 points.</em>
+                    Agentic email without an approval gate &mdash; the exact failure mode commentators
+                    predicted at the start of the year.
+                  </li>
+                  <li style="margin-bottom: 12px; line-height: 1.6; color: var(--ink);">
+                    <b style="font-family: var(--font-display); font-weight: 500;"><a href="#" style="color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent-deep);">Claude Code as a Daily Driver</a></b>
+                    &mdash; <em style="color: var(--ink-muted);">Hacker News &middot; 165 points.</em>
+                    Deep coverage of CLAUDE.md memory, skills, and MCP wiring &mdash; directly relevant
+                    if you&rsquo;re building your CC setup on Mac OS.
+                  </li>
+                  <li style="margin-bottom: 12px; line-height: 1.6; color: var(--ink);">
+                    <b style="font-family: var(--font-display); font-weight: 500;"><a href="#" style="color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent-deep);">Pullfrog by Spec-Source Cumbalek</a></b>
+                    &mdash; <em style="color: var(--ink-muted);">Lobsters.</em>
+                    Promised standard for tracing AI agent execution &mdash; if it gains traction,
+                    this is the OpenTelemetry moment for AI agents.
+                  </li>
+                </ul>
+
+                <h2><span class="num">§ 03</span>Also worth a skim</h2>
+                <ul style="margin: 16px 0; padding-left: 22px; list-style: disc; color: var(--ink-muted);">
+                  <li style="margin-bottom: 8px; line-height: 1.6; color: var(--ink);">Dueling Pyxl Browse &mdash; Simon Willison. PR says he&rsquo;s never finished an AI-written model &mdash; close signal on the professional cost of onboarding AI assistants.</li>
+                  <li style="margin-bottom: 8px; line-height: 1.6; color: var(--ink);">Thomas&rsquo;s translating Golang to wasm. WASM compile layer.</li>
+                  <li style="margin-bottom: 8px; line-height: 1.6; color: var(--ink);">Sandy Edwards &amp; SerSE: AI alternatives to Indie Cinema. Content detection API on smart cameras.</li>
+                  <li style="margin-bottom: 8px; line-height: 1.6; color: var(--ink);">Eric Brockwich made a memo to track data safety markets &mdash; bonus points if you&rsquo;ll dig into the new tooling around environmental activist activists.</li>
+                  <li style="margin-bottom: 8px; line-height: 1.6; color: var(--ink);">Pullfrog hits 5.4k stars in its first week.</li>
+                </ul>
+
+                <h2><span class="num">§ 04</span>Quick takes</h2>
+                <ul style="margin: 16px 0; padding-left: 22px; list-style: disc; color: var(--ink-muted);">
+                  <li style="margin-bottom: 8px; line-height: 1.6; color: var(--ink);">AI is a security force multiplier in both directions, as it&rsquo;s drowning curl in better-quality notifications than ever; the tooling layer is exploding around it.</li>
+                  <li style="margin-bottom: 8px; line-height: 1.6; color: var(--ink);">AI Dev tooling is fragmenting productively. Claude Code mastery, Agent Trace RFC, and the rumour of a new IDE all in one week.</li>
+                </ul>
+              </div>
+            </article>
+
+            <!-- marginalia: TOC is auto-derived from the markdown's H2s. -->
+            <aside class="article-aside">
+              <h2>In this article</h2>
+              <a class="toc-item active" href="#"><span class="toc-num">01</span><span>What stood out</span></a>
+              <a class="toc-item" href="#"><span class="toc-num">02</span><span>Top stories</span></a>
+              <a class="toc-item" href="#"><span class="toc-num">03</span><span>Also worth a skim</span></a>
+              <a class="toc-item" href="#"><span class="toc-num">04</span><span>Quick takes</span></a>
+
+              <div class="actions">
+                <a href="#"><span>Open the run</span><span>↗</span></a>
+                <a href="#"><span>Copy markdown</span><span>↗</span></a>
+                <a href="#"><span>Re-run News / Dev</span><span>↻</span></a>
+              </div>
+            </aside>
+          </div>
+
+          <div class="frame-caption">
+            <span class="pin">●</span><b>What changed &mdash; markdown rendered, not parsed.</b>
+            (1)&nbsp;The H1 is the real <code>article.title</code> in italic Fraunces; the eyebrow is
+            the parent workflow name. Nothing invented &mdash; both fields exist.
+            (2)&nbsp;A drop cap in gold opens the first paragraph &mdash; works on any markdown
+            body, no field needed.
+            (3)&nbsp;H2 sections get a numeric &ldquo;§&nbsp;01&rdquo; eyebrow generated client-side
+            from the rendered markdown.
+            (4)&nbsp;Top-stories render as a <em>real</em> bulleted list (because that&rsquo;s what
+            the markdown is) &mdash; just set well: leading bold pulled to Fraunces, accent
+            underlined links, generous line-height.
+            (5)&nbsp;The byline rule beneath the H1 surfaces the connection back to the run
+            (workflow, time, duration, git SHA) with secondary actions on the right.
+            (6)&nbsp;Right rail is article-aware: TOC mirrors the H2 list, actions point back
+            at the run (open, copy, re-run).
+            <br /><br />
+            <b>Notes for implementation.</b> The TOC and section eyebrows need to be
+            generated from the rendered markdown (visit each <code>&lt;h2&gt;</code>, assign an
+            <code>id</code> if missing, ordinal it). Nothing else here requires changes to the
+            article data contract.
+          </div>
+        </div>
+
+        <!-- sparse-markdown article: same typesetting treatment applied to a much
+             shorter body. Demonstrates that the article view doesn't need invented
+             structure to look considered. -->
+        <div class="frame">
+          <span class="frame-tag">Mock · Article · Sparse markdown</span>
+          <div class="article-shell">
+            <aside class="side">
+              <h1 class="wordmark">kiri</h1>
+              <div class="wordmark-meta"><span style="display: inline-flex; align-items: center; gap: 6px;"><span class="dot ok" style="width: 6px; height: 6px; border-radius: 50%; background: var(--ok); display: inline-block;"></span><b>22&nbsp;runs · 0&nbsp;failed</b></span><br />v0.20.0 · Wed, 27 May</div>
+              <div class="side-section">
+                <h2>Workflows</h2>
+                <ul>
+                  <div class="group-label">Dev</div>
+                  <li><a class="active" href="#"><span class="dot ok"></span><span>Patch</span><span class="tail">1h</span></a></li>
+                </ul>
+              </div>
+            </aside>
+
+            <article class="article-main">
+              <div class="article-eyebrow">Dev / Patch</div>
+              <h1 class="article-h1">Security Patch</h1>
+              <p style="font-family: var(--font-display); font-size: 20px; font-style: italic; color: var(--ink-muted); margin: 8px 0 0; line-height: 1.4;">
+                BPP-Education-Group/autoid-verify-service security patch
+              </p>
+
+              <div class="article-byline">
+                <div>
+                  From the run on <b>Dev / Patch</b> &middot;
+                  <time datetime="2026-05-27T20:00:00">1&nbsp;h ago</time> &middot;
+                  3m&nbsp;33s &middot; <code style="font-family: var(--font-mono); background: var(--paper); padding: 0 6px;">576a5ae</code>
+                </div>
+                <div class="right">
+                  <a href="#" style="color: var(--accent); text-decoration: none;">open run ↗</a>
+                  <a href="#" style="color: var(--accent); text-decoration: none;">copy markdown</a>
+                </div>
+              </div>
+
+              <div class="article-body">
+                <p>
+                  PR is open at
+                  <a href="#" style="color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent-deep);">https://github.com/BPP-Education-Group/autoid-verify-service/pull/79</a>.
+                </p>
+
+                <p>
+                  Outcome: <b style="font-family: var(--font-display); font-weight: 500;">PR opened.</b>
+                </p>
+                <p>
+                  Both dependabot alerts targeted the same package
+                  (<code style="font-family: var(--font-mono); background: var(--paper); padding: 0 6px; border-radius: 2px;">uuid</code>);
+                  bumping to 11.1.1 in
+                  <code style="font-family: var(--font-mono); background: var(--paper); padding: 0 6px; border-radius: 2px;">package.json</code>
+                  and regenerating
+                  <code style="font-family: var(--font-mono); background: var(--paper); padding: 0 6px; border-radius: 2px;">yarn.lock</code>
+                  resolves them. All 78 unit tests pass on the patched lockfile.
+                </p>
+
+                <h2 style="font-size: 24px;"><span class="num">§ 01</span>Patched</h2>
+                <ul style="margin: 16px 0; padding-left: 22px; list-style: disc; color: var(--ink-muted);">
+                  <li style="margin-bottom: 10px; line-height: 1.65; color: var(--ink);">
+                    <code style="font-family: var(--font-mono); background: var(--paper); padding: 0 6px; border-radius: 2px;">uuid 10.0.0 → 11.1.1</code>
+                    &mdash; missing buffer bounds check in v3/v5/v6 when
+                    <code style="font-family: var(--font-mono); background: var(--paper); padding: 0 6px; border-radius: 2px;">buf</code>
+                    is provided
+                    <ul style="margin-top: 6px; padding-left: 22px; list-style: circle; color: var(--ink-muted);">
+                      <li style="line-height: 1.6; color: var(--ink);"><a href="#" style="color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent-deep);">Alert #72</a> (package.json)</li>
+                      <li style="line-height: 1.6; color: var(--ink);"><a href="#" style="color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent-deep);">Alert #71</a> (yarn.lock)</li>
+                    </ul>
+                  </li>
+                </ul>
+              </div>
+            </article>
+
+            <aside class="article-aside">
+              <h2>In this article</h2>
+              <a class="toc-item active" href="#"><span class="toc-num">01</span><span>Patched</span></a>
+
+              <div class="actions">
+                <a href="#"><span>Open the run</span><span>↗</span></a>
+                <a href="#"><span>Copy markdown</span><span>↗</span></a>
+                <a href="#"><span>Re-run Dev / Patch</span><span>↻</span></a>
+              </div>
+            </aside>
+          </div>
+
+          <div class="frame-caption">
+            <span class="pin">●</span><b>The same chrome handles sparse markdown.</b>
+            This article&rsquo;s body is exactly what the workflow published &mdash;
+            three short paragraphs and one nested list. The page still feels considered
+            because the chrome (H1 lockup, byline rule, drop cap, marginalia TOC,
+            link styling, code inlining) does the work. No CVE-severity cards, no PR
+            embed, no stat strip &mdash; none of that is in the data, so none of it
+            appears.
+            <br /><br />
+            <b>The contract.</b> Articles are markdown bodies. The reader just sets
+            them well.
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================================================
+           § 04 — workflow page mock
+           ========================================================= -->
+      <section class="section" id="workflow">
+        <div class="section-eyebrow">§ 04 · Mockup</div>
+        <h2 class="section-title">Workflow as story.</h2>
+        <p class="section-deck">
+          What did it last do? Is it healthy? Show that first. The YAML
+          definition stays one tab away &mdash; it's not the lead.
+        </p>
+
+        <div class="frame">
+          <span class="frame-tag">Mock · Workflow detail · Dev / Patch</span>
+
+          <div class="shell">
+            <aside class="side">
+              <h1 class="wordmark">kiri</h1>
+              <div class="wordmark-meta"><span style="display: inline-flex; align-items: center; gap: 6px;"><span class="dot ok" style="width: 6px; height: 6px; border-radius: 50%; background: var(--ok); display: inline-block;"></span><b>22&nbsp;runs · 0&nbsp;failed</b></span><br />v0.20.0 · Wed, 27 May</div>
+              <div class="side-section">
+                <h2>Workflows</h2>
+                <ul>
+                  <div class="group-label">Dev</div>
+                  <li><a href="#"><span class="dot ok"></span><span>GitHub Security Audit</span><span class="tail">5h</span></a></li>
+                  <li><a href="#"><span class="dot ok"></span><span>Open PRs</span><span class="tail">10h</span></a></li>
+                  <li><a class="active" href="#"><span class="dot ok"></span><span>Patch</span><span class="tail">1h</span></a></li>
+                  <li><a href="#"><span class="dot ok"></span><span>PR Review</span><span class="tail">10h</span></a></li>
+                </ul>
+              </div>
+            </aside>
+
+            <section class="main">
+              <header class="main-masthead" style="border-bottom-color: var(--rule);">
+                <div class="left">
+                  <div class="eyebrow">Dev · Workflow</div>
+                  <h1 style="font-size: 64px;">Patch.</h1>
+                </div>
+                <div class="right">
+                  <div class="date">Last run · 1&nbsp;h ago</div>
+                  <div>autoid-verify-service · ok · 3m 33s</div>
+                </div>
+              </header>
+
+              <div class="wf-hero" style="border-bottom: 1px solid var(--rule); padding-bottom: 32px;">
+                <div>
+                  <p class="deck">
+                    Patches Dependabot, code-scanning and secret-scanning alerts for the
+                    target repo. Opens a PR with the lockfile-only fix and a short
+                    advisory summary.
+                  </p>
+                  <div class="actions">
+                    <a class="btn primary" href="#">run with inputs</a>
+                    <a class="btn" href="#">view definition</a>
+                    <a class="btn" href="#">copy JSON schema</a>
+                  </div>
+                </div>
+
+                <div class="panel">
+                  <h3>Last 14 runs</h3>
+                  <div class="panel-body">
+                    <div class="stat-stack">
+                      <div class="row"><span class="lbl">runs</span><span>18</span></div>
+                      <div class="row"><span class="lbl">ok</span><span style="color: var(--ok);">18</span></div>
+                      <div class="row"><span class="lbl">failed</span><span style="color: var(--ink-muted);">0</span></div>
+                      <div class="row"><span class="lbl">articles</span><span>18</span></div>
+                      <div class="row"><span class="lbl">avg duration</span><span>2m&nbsp;51s</span></div>
+                    </div>
+                    <div class="panel-spark-col">
+                      <div class="spark" title="Run durations (last 14 runs)">
+                        <span class="bar"></span>
+                        <span class="bar tall"></span>
+                        <span class="bar"></span>
+                        <span class="bar tall"></span>
+                        <span class="bar"></span>
+                        <span class="bar"></span>
+                        <span class="bar tall"></span>
+                        <span class="bar warm"></span>
+                        <span class="bar"></span>
+                        <span class="bar tall"></span>
+                        <span class="bar"></span>
+                        <span class="bar tall"></span>
+                        <span class="bar tall"></span>
+                        <span class="bar"></span>
+                      </div>
+                      <div style="margin-top: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--ink-faint); display: flex; justify-content: space-between;">
+                        <span>oldest</span><span>duration · now</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <nav class="wf-tabs">
+                <a class="active" href="#">Recent runs</a>
+                <a href="#">Inputs</a>
+                <a href="#">Steps</a>
+                <a href="#">Summariser</a>
+                <a class="right-tab" href="#">YAML&nbsp;definition&nbsp;↗</a>
+              </nav>
+
+              <!-- Recent runs render as feed-style rows so the workflow page and
+                   the home feed share visual language. Title is the first input
+                   (repo); body is the actual run.summary first line. -->
+              <div class="wf-runs">
+                <a class="wf-run-card" href="#" data-status="ok">
+                  <div class="kicker"><span class="s">ok</span><span class="sep">·</span><span>1&nbsp;h ago</span><span class="sep">·</span><span>3m&nbsp;33s</span><span class="sep">·</span><code style="font-family: var(--font-mono);">576a5ae</code></div>
+                  <div class="head-row">
+                    <span class="title">autoid-verify-service</span>
+                    <span class="arrow" aria-hidden="true">→</span>
+                  </div>
+                  <div class="body">patched 2 advisories with 0 skipped at PR&nbsp;#79.</div>
+                </a>
+                <a class="wf-run-card" href="#" data-status="ok">
+                  <div class="kicker"><span class="s">ok</span><span class="sep">·</span><span>1&nbsp;h ago</span><span class="sep">·</span><span>3m</span><span class="sep">·</span><code style="font-family: var(--font-mono);">576a5ae</code></div>
+                  <div class="head-row">
+                    <span class="title">document-storage-service</span>
+                    <span class="arrow" aria-hidden="true">→</span>
+                  </div>
+                  <div class="body">patched 2 code-scanning advisories (both unpinned GitHub Action tags) with PR&nbsp;#201, skipping no advisories.</div>
+                </a>
+                <a class="wf-run-card" href="#" data-status="ok">
+                  <div class="kicker"><span class="s">ok</span><span class="sep">·</span><span>1&nbsp;h ago</span><span class="sep">·</span><span>3m&nbsp;24s</span><span class="sep">·</span><code style="font-family: var(--font-mono);">576a5ae</code></div>
+                  <div class="head-row">
+                    <span class="title">join-external-application-adapter</span>
+                    <span class="arrow" aria-hidden="true">→</span>
+                  </div>
+                  <div class="body">patched 3 advisories and skipped 1, opening PR&nbsp;#116.</div>
+                </a>
+                <a class="wf-run-card" href="#" data-status="ok">
+                  <div class="kicker"><span class="s">ok</span><span class="sep">·</span><span>3&nbsp;h ago</span><span class="sep">·</span><span>2m&nbsp;1s</span><span class="sep">·</span><code style="font-family: var(--font-mono);">576a5ae</code></div>
+                  <div class="head-row">
+                    <span class="title">join-opensearch</span>
+                    <span class="arrow" aria-hidden="true">→</span>
+                  </div>
+                  <div class="body">3 advisories addressed, 0 skipped, PR&nbsp;#17.</div>
+                </a>
+                <a class="wf-run-card" href="#" data-status="ok">
+                  <div class="kicker"><span class="s">ok</span><span class="sep">·</span><span>3&nbsp;h ago</span><span class="sep">·</span><span>2m&nbsp;27s</span><span class="sep">·</span><code style="font-family: var(--font-mono);">b8d214a</code></div>
+                  <div class="head-row">
+                    <span class="title">products-service</span>
+                    <span class="arrow" aria-hidden="true">→</span>
+                  </div>
+                  <div class="body">1 advisory patched, 0 skipped; PR&nbsp;#306.</div>
+                </a>
+                <a class="wf-run-card" href="#" data-status="ok">
+                  <div class="kicker"><span class="s">ok</span><span class="sep">·</span><span>3&nbsp;h ago</span><span class="sep">·</span><span>3m&nbsp;22s</span><span class="sep">·</span><code style="font-family: var(--font-mono);">b8d214a</code></div>
+                  <div class="head-row">
+                    <span class="title">join-application-service</span>
+                    <span class="arrow" aria-hidden="true">→</span>
+                  </div>
+                  <div class="body">2 advisories patched, 2 skipped; PR&nbsp;#2302.</div>
+                </a>
+              </div>
+            </section>
+
+            <aside class="rail">
+              <h2>Inputs</h2>
+              <ul class="agenda" style="padding: 0;">
+                <li><span class="when">repo</span><span style="font-family: var(--font-mono);">string</span><span class="tag">required</span></li>
+                <li><span class="when">model</span><span style="font-family: var(--font-mono);">string</span><span class="tag">opt</span></li>
+                <li><span class="when">claude_config</span><span style="font-family: var(--font-mono);">string</span><span class="tag">opt</span></li>
+              </ul>
+
+              <div class="rail-section">
+                <h2>Publishes</h2>
+                <ul class="agenda" style="padding: 0;">
+                  <li><span class="when">art</span><span>Security Patch</span><span class="tag">md</span></li>
+                </ul>
+              </div>
+
+              <div class="rail-section">
+                <h2>Latest run</h2>
+                <div class="digest-card" style="padding-top: 4px;">
+                  <div class="a-eyebrow" style="color: var(--ok);">ok · 1&nbsp;h ago · 3m&nbsp;33s</div>
+                  <div class="a-title">autoid-verify-service</div>
+                  <div class="a-meta">patched 2 advisories with 0 skipped at PR&nbsp;#79.</div>
+                </div>
+              </div>
+            </aside>
+          </div>
+
+          <div class="frame-caption">
+            <span class="pin">●</span><b>What changed &mdash; grounded to <code>WorkflowSummary</code> + run history.</b>
+            (1)&nbsp;The workflow lead is the <em>purpose</em> and the <em>last result</em>, not
+            its YAML. Deck text is the workflow&rsquo;s leading-comment or first paragraph; if
+            the workflow has none, this slot stays empty rather than being invented.
+            (2)&nbsp;The hero panel shows only what runs carry: count, status breakdown,
+            average duration, plus a 14-bar duration sparkline (warm bars are slower-than-median
+            runs &mdash; derived from <code>finishedAt&nbsp;-&nbsp;startedAt</code>).
+            (3)&nbsp;Tabs &mdash; Recent runs · Inputs · Steps · Summariser &mdash; place recent runs
+            <em>first</em>. The YAML escape hatch sits at the right edge as a secondary tab.
+            (4)&nbsp;Recent-run cards show the first input value (e.g. <code>repo</code>) as the
+            card title and the actual <code>run.summary</code> first line beneath. No invented
+            per-card stats.
+            (5)&nbsp;Right rail mirrors the workflow&rsquo;s actual <code>WorkflowSummary</code>:
+            declared inputs (with required/opt flags), declared <code>publish</code> entries,
+            and the latest run summary &mdash; all real fields.
+          </div>
+        </div>
+
+        <!-- run detail mock -->
+        <div class="frame">
+          <span class="frame-tag">Mock · Run detail</span>
+
+          <div class="shell">
+            <aside class="side">
+              <h1 class="wordmark">kiri</h1>
+              <div class="wordmark-meta"><span style="display: inline-flex; align-items: center; gap: 6px;"><span class="dot ok" style="width: 6px; height: 6px; border-radius: 50%; background: var(--ok); display: inline-block;"></span><b>22&nbsp;runs · 0&nbsp;failed</b></span><br />v0.20.0 · Wed, 27 May</div>
+              <div class="side-section">
+                <h2>Workflows</h2>
+                <ul>
+                  <div class="group-label">Dev</div>
+                  <li><a class="active" href="#"><span class="dot ok"></span><span>Patch</span><span class="tail">now</span></a></li>
+                </ul>
+              </div>
+            </aside>
+
+            <section class="main">
+              <div class="run-hero" data-status="ok">
+                <div class="crumb">
+                  <a href="#">← all activity</a>
+                  <span class="sep">/</span>
+                  <a href="#">dev / patch</a>
+                  <span class="sep">/</span>
+                  <span style="color: var(--ink);">576a5ae</span>
+                </div>
+
+                <!-- Hero is the workflow identity at a restrained size.
+                     The run.summary follows in its own block — which scales
+                     with the summary's actual length. -->
+                <h1 class="run-title">Dev / Patch</h1>
+
+                <div class="verdict-meta">
+                  <span class="status-pill"><span class="dot ok" style="width: 6px; height: 6px; border-radius: 50%; background: var(--ok); display: inline-block;"></span>ok</span>
+                  <span>started <b>1&nbsp;h ago</b></span>
+                  <span>ran for <b>3m&nbsp;33s</b></span>
+                  <span><b>576a5ae</b> <span class="italic" style="color: var(--ink-muted);">(dirty)</span></span>
+                  <span style="margin-left: auto; display: flex; gap: 8px;">
+                    <a class="btn" href="#">run again</a>
+                    <a class="btn danger" href="#">delete</a>
+                  </span>
+                </div>
+              </div>
+
+              <!-- Summary: narrative content belonging to the hero, not a peer
+                   section. Body-quote treatment: gold left rule, indented, no
+                   heading. Works whether the summary is one sentence (here)
+                   or a multi-paragraph PR review (next frame). -->
+              <div class="run-summary">
+                <p>
+                  <strong>autoid-verify-service</strong>
+                  patched 2 advisories with 0 skipped at
+                  <a href="#">https://github.com/BPP-Education-Group/autoid-verify-service/pull/79</a>.
+                </p>
+              </div>
+
+              <section class="run-section" style="margin-top: 36px;">
+                <div class="run-section-head">
+                  <h2>Published</h2>
+                  <span class="meta">1 article</span>
+                </div>
+                <a class="published-hero" href="#">
+                  <div class="icon">A</div>
+                  <div>
+                    <div class="ph-eyebrow">Article · markdown</div>
+                    <div class="ph-title">BPP-Education-Group/autoid-verify-service security patch</div>
+                    <div class="ph-sub">~&nbsp;1 minute to read · open in reader →</div>
+                  </div>
+                  <span class="arrow">→</span>
+                </a>
+              </section>
+
+              <section class="run-section">
+                <div class="run-section-head">
+                  <h2>Inputs</h2>
+                  <span class="meta">3 inputs</span>
+                </div>
+                <div class="activity-table">
+                  <div class="activity-row" style="grid-template-columns: 140px 1fr;">
+                    <span class="kind">repo</span>
+                    <span class="name">BPP-Education-Group/autoid-verify-service</span>
+                  </div>
+                  <div class="activity-row" style="grid-template-columns: 140px 1fr;">
+                    <span class="kind">model</span>
+                    <span class="name">sonnet</span>
+                  </div>
+                  <div class="activity-row" style="grid-template-columns: 140px 1fr;">
+                    <span class="kind">claude_config</span>
+                    <span class="name">/Users/leecheneler/.claude-bpp</span>
+                  </div>
+                </div>
+              </section>
+
+              <section class="run-section">
+                <div class="run-section-head">
+                  <h2>Activity</h2>
+                  <span class="meta">3 items · 3m 33s</span>
+                </div>
+                <div class="activity-table">
+                  <div class="activity-row">
+                    <span class="ord tabular">01</span>
+                    <span class="kind">step</span>
+                    <span class="name">sh: set -eu</span>
+                    <span class="s">ok</span>
+                    <span class="dur">2.0&nbsp;s</span>
+                    <span class="chev">▾</span>
+                  </div>
+                  <div class="activity-row">
+                    <span class="ord tabular">02</span>
+                    <span class="kind">publishing</span>
+                    <span class="name">Security Patch</span>
+                    <span class="s">ok</span>
+                    <span class="dur">3m&nbsp;21s</span>
+                    <span class="chev">▾</span>
+                  </div>
+                  <div class="activity-row">
+                    <span class="ord tabular">03</span>
+                    <span class="kind">summarising</span>
+                    <span class="name">use: claude-code-summariser</span>
+                    <span class="s">ok</span>
+                    <span class="dur">9.2&nbsp;s</span>
+                    <span class="chev">▾</span>
+                  </div>
+                </div>
+              </section>
+            </section>
+
+            <aside class="rail">
+              <h2>Duration</h2>
+              <div class="digest-card">
+                <div class="a-eyebrow">Compared to last 14</div>
+                <div class="a-title">42&nbsp;s slower than median</div>
+                <div class="a-meta">median · 2m&nbsp;51s · this run · 3m&nbsp;33s</div>
+              </div>
+
+              <div class="rail-section">
+                <h2>Output</h2>
+                <ul class="agenda" style="padding: 0;">
+                  <li><span class="when">art</span><span>Security Patch</span><span class="tag">md</span></li>
+                  <li><span class="when">rec</span><span><em style="color: var(--ink-muted); font-style: italic;">none</em></span><span class="tag">0</span></li>
+                </ul>
+              </div>
+
+              <div class="rail-section">
+                <h2>Other Dev / Patch runs · today</h2>
+                <ul class="agenda" style="padding: 0;">
+                  <li><span class="when">1&nbsp;h</span><span>document-storage-service</span><span class="tag">ok</span></li>
+                  <li><span class="when">1&nbsp;h</span><span>join-external-application-adapter</span><span class="tag">ok</span></li>
+                  <li><span class="when">3&nbsp;h</span><span>join-opensearch</span><span class="tag">ok</span></li>
+                </ul>
+              </div>
+            </aside>
+          </div>
+
+          <div class="frame-caption">
+            <span class="pin">●</span><b>What changed &mdash; hero is the workflow, summary is a body-quote beneath.</b>
+            (1)&nbsp;The hero is the workflow name (matching the current product) at restrained 56px italic Fraunces. A status pill replaces the bare &ldquo;ok&rdquo; word.
+            (2)&nbsp;A thicker (4px) status-coloured rule replaces the 2px strip &mdash; the run-detail wears the motif at full volume.
+            (3)&nbsp;The <code>run.summary</code> markdown sits directly under the hero as narrative content (no heading), not a peer section to Published&nbsp;/&nbsp;Inputs&nbsp;/&nbsp;Activity (which are sections containing lists or tables and so get H2 headings). Rendered at body size so it scales with summaries of any length &mdash; see the next frame for the long PR-review case.
+            (4)&nbsp;Published hero card with gold border for the run&rsquo;s <code>articles[]</code>.
+            (5)&nbsp;Activity table renders the real <code>RunDetail.steps[]</code> &mdash; ordinal, kind, step title, status, duration, expansion chevron.
+            (6)&nbsp;Right rail is run-aware: duration vs the workflow&rsquo;s recent median, declared outputs from <code>definitionSnapshot.publish</code> + recommendations count, and adjacent same-workflow runs today.
+          </div>
+        </div>
+
+        <!-- Second run-detail frame: long, multi-paragraph PR-review summary. -->
+        <div class="frame">
+          <span class="frame-tag">Mock · Run detail · long summary (PR review)</span>
+
+          <div class="shell">
+            <aside class="side">
+              <h1 class="wordmark">kiri</h1>
+              <div class="wordmark-meta"><span style="display: inline-flex; align-items: center; gap: 6px;"><span class="dot ok" style="width: 6px; height: 6px; border-radius: 50%; background: var(--ok); display: inline-block;"></span><b>22&nbsp;runs · 0&nbsp;failed</b></span><br />v0.20.0 · Wed, 27 May</div>
+              <div class="side-section">
+                <h2>Workflows</h2>
+                <ul>
+                  <div class="group-label">Dev</div>
+                  <li><a class="active" href="#"><span class="dot ok"></span><span>PR Review</span><span class="tail">10h</span></a></li>
+                </ul>
+              </div>
+            </aside>
+
+            <section class="main">
+              <div class="run-hero" data-status="ok">
+                <div class="crumb">
+                  <a href="#">← all activity</a>
+                  <span class="sep">/</span>
+                  <a href="#">dev / pr review</a>
+                  <span class="sep">/</span>
+                  <span style="color: var(--ink);">978bf3f</span>
+                </div>
+
+                <h1 class="run-title">Dev / PR Review</h1>
+
+                <div class="verdict-meta">
+                  <span class="status-pill"><span class="dot ok" style="width: 6px; height: 6px; border-radius: 50%; background: var(--ok); display: inline-block;"></span>ok</span>
+                  <span>started <b>10&nbsp;h ago</b></span>
+                  <span>ran for <b>4m&nbsp;40s</b></span>
+                  <span><b>978bf3f</b></span>
+                  <span style="margin-left: auto; display: flex; gap: 8px;">
+                    <a class="btn" href="#">run again</a>
+                    <a class="btn danger" href="#">delete</a>
+                  </span>
+                </div>
+              </div>
+
+              <!-- Summary: real PR-review case from the live site. One dense
+                   paragraph with bold lead, inline links, inline code, and a
+                   bold mid-paragraph emphasis. Same body-quote treatment as
+                   the short case. -->
+              <div class="run-summary">
+                <p>
+                  <strong><a href="#">BPP-Education-Group/join-flex #1045</a> reviewed &mdash; Approve with nits</strong>
+                </p>
+                <p>
+                  Small, focused diff adding two mutually-exclusive
+                  <code>applicationStageChanged</code> event triggers on LMR completion.
+                  Predicates are tight and wire shape matches existing patterns.
+                  <strong>Main concern:</strong> no-changes path emits the Salesforce event
+                  but doesn&rsquo;t update the local application stage &mdash; compare with
+                  sibling triggers that pair event + stage update + activity write. Confirm
+                  whether that&rsquo;s intentional or a follow-up ticket. Minor: docstring
+                  mentions spreading objects but code spreads ids; suggestion to hoist the
+                  id-map to avoid duplication across both trigger conditions.
+                </p>
+              </div>
+
+              <section class="run-section" style="margin-top: 36px;">
+                <div class="run-section-head">
+                  <h2>Published</h2>
+                  <span class="meta">1 article</span>
+                </div>
+                <a class="published-hero" href="#">
+                  <div class="icon">A</div>
+                  <div>
+                    <div class="ph-eyebrow">Article · markdown</div>
+                    <div class="ph-title">BPP-Education-Group/join-flex &mdash; feat(apprenticeship-schema): emit applicationStageChanged on LMR completion (#1045)</div>
+                    <div class="ph-sub">~&nbsp;3 minutes to read · open in reader →</div>
+                  </div>
+                  <span class="arrow">→</span>
+                </a>
+              </section>
+
+              <section class="run-section">
+                <div class="run-section-head">
+                  <h2>Inputs</h2>
+                  <span class="meta">2 inputs</span>
+                </div>
+                <div class="activity-table">
+                  <div class="activity-row" style="grid-template-columns: 140px 1fr;">
+                    <span class="kind">pr</span>
+                    <span class="name">BPP-Education-Group/join-flex#1045</span>
+                  </div>
+                  <div class="activity-row" style="grid-template-columns: 140px 1fr;">
+                    <span class="kind">model</span>
+                    <span class="name">sonnet</span>
+                  </div>
+                </div>
+              </section>
+            </section>
+
+            <aside class="rail">
+              <h2>Duration</h2>
+              <div class="digest-card">
+                <div class="a-eyebrow">Compared to last 14</div>
+                <div class="a-title">about average</div>
+                <div class="a-meta">median · 3m&nbsp;1s · this run · 3m&nbsp;6s</div>
+              </div>
+              <div class="rail-section">
+                <h2>Output</h2>
+                <ul class="agenda" style="padding: 0;">
+                  <li><span class="when">art</span><span>Pull Request Review</span><span class="tag">md</span></li>
+                  <li><span class="when">rec</span><span><em style="color: var(--ink-muted); font-style: italic;">none</em></span><span class="tag">0</span></li>
+                </ul>
+              </div>
+            </aside>
+          </div>
+
+          <div class="frame-caption">
+            <span class="pin">●</span><b>Same hero, real long summary.</b>
+            This frame uses the actual summary from the live #1045 PR review &mdash; one dense paragraph with a bold lead, inline code, inline links and a mid-paragraph &ldquo;Main concern:&rdquo; pivot. Rendered at body size (mono, 14px, 1.7 line-height, 76ch max) &mdash; the block expands naturally to fit the content. Bold phrases lift via Fraunces strong; the rest stays mono so a four-paragraph review reads as one calm block.
+          </div>
+        </div>
+      </section>
+
+      <!-- =========================================================
+           tokens reference
+           ========================================================= -->
+      <section class="section" id="tokens">
+        <div class="section-eyebrow">§ 05 · Tokens &amp; type</div>
+        <h2 class="section-title">Same palette, used more bravely.</h2>
+        <p class="section-deck">
+          Nothing new is invented. Two surfaces are added (paper-2, rule-strong),
+          and the existing scale stretches up to 84&nbsp;px (statistics) and 96&nbsp;px
+          (masthead) which it doesn&apos;t yet reach.
+        </p>
+
+        <div class="tokens">
+          <div class="swatch"><div class="chip" style="background: var(--canvas);"></div><div class="meta"><b>canvas</b>#0e0f0d</div></div>
+          <div class="swatch"><div class="chip" style="background: var(--canvas-2);"></div><div class="meta"><b>canvas-2 · new</b>#131310</div></div>
+          <div class="swatch"><div class="chip" style="background: var(--paper);"></div><div class="meta"><b>paper</b>#1a1b19</div></div>
+          <div class="swatch"><div class="chip" style="background: var(--paper-2);"></div><div class="meta"><b>paper-2 · new</b>#21221f</div></div>
+          <div class="swatch"><div class="chip" style="background: var(--ink);"></div><div class="meta"><b>ink</b>#e5dfd2</div></div>
+          <div class="swatch"><div class="chip" style="background: var(--ink-muted);"></div><div class="meta"><b>ink-muted</b>#8b8579</div></div>
+          <div class="swatch"><div class="chip" style="background: var(--ink-faint);"></div><div class="meta"><b>ink-faint · new</b>#4f4b43</div></div>
+          <div class="swatch"><div class="chip" style="background: var(--rule);"></div><div class="meta"><b>rule</b>#2a2a26</div></div>
+          <div class="swatch"><div class="chip" style="background: var(--accent);"></div><div class="meta"><b>accent</b>#d6b85a</div></div>
+          <div class="swatch"><div class="chip" style="background: var(--accent-deep);"></div><div class="meta"><b>accent-deep · new</b>#a58a3c</div></div>
+          <div class="swatch"><div class="chip" style="background: var(--accent-warm);"></div><div class="meta"><b>accent-warm</b>#c99858</div></div>
+          <div class="swatch"><div class="chip" style="background: var(--ok);"></div><div class="meta"><b>ok</b>#88a579</div></div>
+        </div>
+
+        <div class="type-scale">
+          <div class="lbl">D1 · 96 italic</div>
+          <div class="demo first"><div class="ts-1">Today.</div></div>
+
+          <div class="lbl">D2 · 64 italic</div>
+          <div class="demo"><div class="ts-2">A real reading view</div></div>
+
+          <div class="lbl">H1 · 36 roman</div>
+          <div class="demo"><div class="ts-3">Section heading at thirty-six</div></div>
+
+          <div class="lbl">H2 · 22 roman</div>
+          <div class="demo"><div class="ts-4">Story-card title at twenty-two</div></div>
+
+          <div class="lbl">Deck · 18 italic</div>
+          <div class="demo"><div class="ts-5">An italic Fraunces deck, used directly under the H1 to set the day&apos;s argument.</div></div>
+
+          <div class="lbl">Body · 14 mono</div>
+          <div class="demo"><div class="ts-6">JetBrains Mono at 14&nbsp;/&nbsp;1.6 &mdash; the workhorse for body text and metadata.</div></div>
+
+          <div class="lbl">Kicker · 11 caps</div>
+          <div class="demo"><div class="ts-7">Eyebrow / kicker · all caps · 11&nbsp;px</div></div>
+        </div>
+      </section>
+
+      <footer class="doc-footer">
+        <div>
+          <div class="lockup">kiri</div>
+          <div style="margin-top: 6px;">A design document &middot; Wed, 27 May 2026 &middot; built atop the v0.20.0 tokens.</div>
+        </div>
+        <div style="text-align: right;">
+          <div><b style="color: var(--ink);">Open in browser</b></div>
+          <div>file://&hellip;/kiri/design-mockups.html</div>
+        </div>
+      </footer>
+    </main>
+  </body>
+</html>
