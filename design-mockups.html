@@ -588,7 +588,9 @@
       .feed-row.review .pr-card .pr-repo { color: var(--ink-muted); }
       .feed-row.review .pr-card .pr-title { color: var(--ink); }
 
-      /* News digest: drop cap + source rail */
+      /* News digest variant — dead CSS retained for now; markup was
+         removed in v2 of this mockup. Drop cap rule has been deleted
+         alongside the article drop cap. */
       .feed-row.digest .head { font-size: 34px; line-height: 1.05; }
       .feed-row.digest .deck {
         margin-top: 14px;
@@ -598,16 +600,6 @@
         line-height: 1.45;
         color: var(--ink);
         max-width: 56ch;
-      }
-      .feed-row.digest .deck::first-letter {
-        font-family: var(--font-display);
-        font-style: italic;
-        font-size: 64px;
-        float: left;
-        line-height: 0.85;
-        margin: 6px 8px -4px 0;
-        color: var(--accent);
-        font-weight: 400;
       }
       .feed-row.digest .sources {
         margin-top: 14px;
@@ -769,16 +761,9 @@
         margin-top: 36px;
         max-width: 68ch;
       }
-      .article-body > p:first-of-type::first-letter {
-        font-family: var(--font-display);
-        font-weight: 300;
-        font-size: 92px;
-        line-height: 0.75;
-        float: left;
-        margin: 8px 12px 0 0;
-        color: var(--accent);
-        font-feature-settings: "ss01";
-      }
+      /* Drop cap intentionally dropped from scope for M9 — earlier
+         mockup revisions explored it; keeping the comment as a marker so
+         it isn't mistakenly re-added by a future iteration. */
       .article-body p {
         margin: 0 0 18px;
         font-size: 16px;
@@ -1555,7 +1540,7 @@
           <article class="crit">
             <span class="verdict lift">Lift</span>
             <h4>Use the gold more bravely</h4>
-            <p>#d6b85a barely appears outside hover states. Promote it to: drop caps on article first paragraphs, section eyebrows, the &ldquo;Published&rdquo; affordance on run pages, active sidebar accents. Stop hiding the only colour you&rsquo;ve committed to.</p>
+            <p>#d6b85a barely appears outside hover states. Promote it to: section eyebrows, the &ldquo;Published&rdquo; affordance on run pages, active sidebar accents, link underlines. Stop hiding the only colour you&rsquo;ve committed to.</p>
           </article>
 
           <article class="crit">
@@ -1566,7 +1551,7 @@
           <article class="crit">
             <span class="verdict rework">Rework</span>
             <h4>Articles render as sparse markdown</h4>
-            <p>Digests and patch reports are <em>just markdown</em> &mdash; that&rsquo;s deliberately the only contract. So the job is to set that markdown beautifully: a real H1 lockup, drop cap on the first paragraph, generous line lengths, an auto-derived H2 table of contents in the margin, and stronger list rhythm. <em>Do not</em> invent structured fields the data doesn&rsquo;t carry.</p>
+            <p>Digests and patch reports are <em>just markdown</em> &mdash; that&rsquo;s deliberately the only contract. So the job is to set that markdown beautifully: a real H1 lockup, generous line lengths, an auto-derived H2 table of contents in the margin, and stronger list rhythm. <em>Do not</em> invent structured fields the data doesn&rsquo;t carry.</p>
           </article>
 
           <article class="crit">
@@ -1965,11 +1950,13 @@
            ========================================================= -->
       <section class="section" id="article">
         <div class="section-eyebrow">§ 03 · Mockup</div>
-        <h2 class="section-title">A real reading view.</h2>
+        <h2 class="section-title">Markdown, set well.</h2>
         <p class="section-deck">
-          The published surface is where Kiri earns the &ldquo;personal periodical&rdquo;
-          metaphor. Treat it like one: drop cap, deck, byline, marginalia table of
-          contents, embedded story cards, a pull quote, and a source rail at the foot.
+          Articles are markdown bodies and that contract is load-bearing. The
+          job is to set that markdown beautifully: a real H1 lockup pulled
+          from <code>article.title</code> and <code>article.heading</code>, a
+          byline rule that ties the article back to its run, an auto-derived
+          marginalia table of contents, and a body that breathes.
         </p>
 
         <div class="frame">
@@ -2099,17 +2086,19 @@
             <span class="pin">●</span><b>What changed &mdash; markdown rendered, not parsed.</b>
             (1)&nbsp;The H1 is the real <code>article.title</code> in italic Fraunces; the eyebrow is
             the parent workflow name. Nothing invented &mdash; both fields exist.
-            (2)&nbsp;A drop cap in gold opens the first paragraph &mdash; works on any markdown
-            body, no field needed.
-            (3)&nbsp;H2 sections get a numeric &ldquo;§&nbsp;01&rdquo; eyebrow generated client-side
+            (2)&nbsp;H2 sections get a numeric &ldquo;§&nbsp;01&rdquo; eyebrow generated client-side
             from the rendered markdown.
-            (4)&nbsp;Top-stories render as a <em>real</em> bulleted list (because that&rsquo;s what
+            (3)&nbsp;Top-stories render as a <em>real</em> bulleted list (because that&rsquo;s what
             the markdown is) &mdash; just set well: leading bold pulled to Fraunces, accent
             underlined links, generous line-height.
-            (5)&nbsp;The byline rule beneath the H1 surfaces the connection back to the run
+            (4)&nbsp;The byline rule beneath the H1 surfaces the connection back to the run
             (workflow, time, duration, git SHA) with secondary actions on the right.
-            (6)&nbsp;Right rail is article-aware: TOC mirrors the H2 list, actions point back
+            (5)&nbsp;Right rail is article-aware: TOC mirrors the H2 list, actions point back
             at the run (open, copy, re-run).
+            <br /><br />
+            <em>Note on the drop cap.</em> Earlier mockup revisions showed a gold drop cap
+            on the first paragraph &mdash; intentionally dropped from M9 scope. The first paragraph
+            renders as plain body type.
             <br /><br />
             <b>Notes for implementation.</b> The TOC and section eyebrows need to be
             generated from the rendered markdown (visit each <code>&lt;h2&gt;</code>, assign an
@@ -2206,10 +2195,9 @@
             <span class="pin">●</span><b>The same chrome handles sparse markdown.</b>
             This article&rsquo;s body is exactly what the workflow published &mdash;
             three short paragraphs and one nested list. The page still feels considered
-            because the chrome (H1 lockup, byline rule, drop cap, marginalia TOC,
-            link styling, code inlining) does the work. No CVE-severity cards, no PR
-            embed, no stat strip &mdash; none of that is in the data, so none of it
-            appears.
+            because the chrome (H1 lockup, byline rule, marginalia TOC, link styling,
+            code inlining) does the work. No CVE-severity cards, no PR embed, no stat
+            strip &mdash; none of that is in the data, so none of it appears.
             <br /><br />
             <b>The contract.</b> Articles are markdown bodies. The reader just sets
             them well.
