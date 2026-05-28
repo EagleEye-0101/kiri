@@ -8,6 +8,7 @@ import {
   type TableHTMLAttributes,
   type TdHTMLAttributes,
   type ThHTMLAttributes,
+  createElement,
   isValidElement,
   lazy,
 } from "react";
@@ -47,7 +48,7 @@ function Anchor({
   // `::before` overlay covering the row, e.g. the activity feed). On
   // surfaces without an overlay it's a no-op — no inset, no z-index.
   const classes =
-    "relative text-accent underline underline-offset-2 transition-colors hover:text-ink focus-visible:text-ink focus-visible:outline-1 focus-visible:outline-accent";
+    "relative text-accent underline decoration-1 decoration-accent-deep underline-offset-2 transition-colors hover:text-ink hover:decoration-ink focus-visible:text-ink focus-visible:outline-1 focus-visible:outline-accent";
   if (href !== undefined && isExternalHref(href)) {
     return (
       <a
@@ -68,77 +69,32 @@ function Anchor({
   );
 }
 
-function Heading1({
-  node: _node,
-  children,
-  ...rest
-}: HTMLAttributes<HTMLHeadingElement> & ExtraProps) {
-  return (
-    <h1 className="mt-10 mb-4 font-display text-3xl text-ink leading-tight first:mt-0" {...rest}>
-      {children}
-    </h1>
-  );
-}
+type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
-function Heading2({
-  node: _node,
-  children,
-  ...rest
-}: HTMLAttributes<HTMLHeadingElement> & ExtraProps) {
-  return (
-    <h2 className="mt-8 mb-3 font-display text-2xl text-ink leading-tight" {...rest}>
-      {children}
-    </h2>
-  );
-}
+// Visual styling per *authored* heading level. The rendered element tag
+// may shift with `downgradeHeaderLevels`, but the visual prominence
+// follows whatever the author wrote — so `# x` always reads as the
+// most prominent heading, even when it lands at <h2> or <h3>.
+const HEADING_CLASSES: Record<HeadingLevel, string> = {
+  1: "mt-10 mb-4 font-display text-3xl text-ink leading-tight first:mt-0",
+  2: "mt-8 mb-3 font-display text-2xl text-ink leading-tight",
+  3: "mt-6 mb-2 font-display text-xl text-ink leading-tight",
+  4: "mt-6 mb-2 font-display text-lg text-ink",
+  5: "mt-4 mb-2 font-display text-base text-ink",
+  6: "mt-4 mb-2 text-xs tracking-widest text-ink-muted uppercase",
+};
 
-function Heading3({
-  node: _node,
-  children,
-  ...rest
-}: HTMLAttributes<HTMLHeadingElement> & ExtraProps) {
-  return (
-    <h3 className="mt-6 mb-2 font-display text-xl text-ink leading-tight" {...rest}>
-      {children}
-    </h3>
-  );
-}
+const clampLevel = (level: number): HeadingLevel => Math.max(1, Math.min(6, level)) as HeadingLevel;
 
-function Heading4({
-  node: _node,
-  children,
-  ...rest
-}: HTMLAttributes<HTMLHeadingElement> & ExtraProps) {
-  return (
-    <h4 className="mt-6 mb-2 font-display text-lg text-ink" {...rest}>
-      {children}
-    </h4>
-  );
-}
-
-function Heading5({
-  node: _node,
-  children,
-  ...rest
-}: HTMLAttributes<HTMLHeadingElement> & ExtraProps) {
-  return (
-    <h5 className="mt-4 mb-2 font-display text-base text-ink" {...rest}>
-      {children}
-    </h5>
-  );
-}
-
-function Heading6({
-  node: _node,
-  children,
-  ...rest
-}: HTMLAttributes<HTMLHeadingElement> & ExtraProps) {
-  return (
-    <h6 className="mt-4 mb-2 text-xs tracking-widest text-ink-muted uppercase" {...rest}>
-      {children}
-    </h6>
-  );
-}
+const buildHeading = (source: HeadingLevel, target: HeadingLevel): Components["h1"] => {
+  return function Heading({
+    node: _node,
+    children,
+    ...rest
+  }: HTMLAttributes<HTMLHeadingElement> & ExtraProps) {
+    return createElement(`h${target}`, { className: HEADING_CLASSES[source], ...rest }, children);
+  };
+};
 
 function Paragraph({
   node: _node,
@@ -146,7 +102,7 @@ function Paragraph({
   ...rest
 }: HTMLAttributes<HTMLParagraphElement> & ExtraProps) {
   return (
-    <p className="mt-4 text-base leading-relaxed text-ink first:mt-0" {...rest}>
+    <p className="mt-3.5 text-base leading-7 text-ink first:mt-0" {...rest}>
       {children}
     </p>
   );
@@ -158,7 +114,7 @@ function UnorderedList({
   ...rest
 }: HTMLAttributes<HTMLUListElement> & ExtraProps) {
   return (
-    <ul className="mt-4 ml-5 list-disc space-y-1 text-ink marker:text-ink-muted" {...rest}>
+    <ul className="mt-4 ml-6 list-disc space-y-1.5 text-ink marker:text-ink-muted" {...rest}>
       {children}
     </ul>
   );
@@ -170,7 +126,7 @@ function OrderedList({
   ...rest
 }: OlHTMLAttributes<HTMLOListElement> & ExtraProps) {
   return (
-    <ol className="mt-4 ml-5 list-decimal space-y-1 text-ink marker:text-ink-muted" {...rest}>
+    <ol className="mt-4 ml-6 list-decimal space-y-1.5 text-ink marker:text-ink-muted" {...rest}>
       {children}
     </ol>
   );
@@ -202,7 +158,7 @@ function HorizontalRule({ node: _node, ...rest }: HTMLAttributes<HTMLHRElement> 
 
 function Strong({ node: _node, children, ...rest }: HTMLAttributes<HTMLElement> & ExtraProps) {
   return (
-    <strong className="font-semibold text-ink" {...rest}>
+    <strong className="font-display font-medium text-ink" {...rest}>
       {children}
     </strong>
   );
@@ -248,7 +204,7 @@ function Code({
     );
   }
   return (
-    <code className="rounded-sm bg-paper px-1.5 py-0.5 font-mono text-sm text-ink" {...rest}>
+    <code className="rounded-sm bg-paper-2 px-2 py-0.5 font-mono text-sm text-ink" {...rest}>
       {children}
     </code>
   );
@@ -336,14 +292,14 @@ function TableCell({
   );
 }
 
-const components: Components = {
+const baseComponents: Components = {
   a: Anchor,
-  h1: Heading1,
-  h2: Heading2,
-  h3: Heading3,
-  h4: Heading4,
-  h5: Heading5,
-  h6: Heading6,
+  h1: buildHeading(1, 1),
+  h2: buildHeading(2, 2),
+  h3: buildHeading(3, 3),
+  h4: buildHeading(4, 4),
+  h5: buildHeading(5, 5),
+  h6: buildHeading(6, 6),
   p: Paragraph,
   ul: UnorderedList,
   ol: OrderedList,
@@ -376,14 +332,107 @@ const components: Components = {
  * `rel="noopener noreferrer"`; same-origin and fragment links pass
  * through untouched.
  *
+ * `downgradeHeaderLevels` shifts every authored heading down by N
+ * levels in the rendered output, clamped at h6. Use on surfaces where
+ * markdown content needs to slot in beneath an outer page heading — for
+ * example, an article surface whose route owns its own `<h2>` title can
+ * pass `1` so body `# section` lands as `<h2>` rather than competing
+ * with the page-shell wordmark `<h1>`.
+ *
+ * `withSectionOrdinals`, when set, stamps every authored `# …`
+ * top-level heading with a deterministic id (`section-01`, …) and a
+ * leading `§ NN` mono eyebrow, rendered at whatever rendered level the
+ * downgrade lands it on. Ordinals key off AST node identity so React
+ * StrictMode's double-render (and any other repeated invocation of the
+ * same heading) doesn't double-count. Anchor IDs are positional —
+ * reordering headings rebinds them — but the trade-off avoids the
+ * duplicate-text slug collisions a heading-text-derived scheme would
+ * bring.
+ *
  * Used by every surface that renders markdown — published articles,
  * activity-feed summaries, the run-detail summary block — so each one
  * inherits the same sandboxing and editorial styling.
  */
-export function Markdown({ content }: { content: string }) {
+export function Markdown({
+  content,
+  withSectionOrdinals = false,
+  downgradeHeaderLevels = 0,
+}: {
+  content: string;
+  withSectionOrdinals?: boolean;
+  downgradeHeaderLevels?: number;
+}) {
+  const resolvedComponents = buildMarkdownComponents({
+    downgrade: downgradeHeaderLevels,
+    withSectionOrdinals,
+  });
   return (
-    <ReactMarkdown components={components} remarkPlugins={[remarkGfm]}>
+    <ReactMarkdown components={resolvedComponents} remarkPlugins={[remarkGfm]}>
       {content}
     </ReactMarkdown>
   );
 }
+
+const buildMarkdownComponents = ({
+  downgrade,
+  withSectionOrdinals,
+}: {
+  downgrade: number;
+  withSectionOrdinals: boolean;
+}): Components => {
+  if (downgrade === 0 && !withSectionOrdinals) return baseComponents;
+  const result: Components = { ...baseComponents };
+  // Ordinals follow the authored top-level heading (`# …`) wherever the
+  // downgrade lands it. The rendered element shifts; the source slot we
+  // override stays h1.
+  for (let source = 1 as HeadingLevel; source <= 6; source++) {
+    const target = clampLevel(source + downgrade);
+    const key = `h${source}` as const;
+    result[key] =
+      withSectionOrdinals && source === 1
+        ? buildOrdinalHeading(source, target)
+        : buildHeading(source, target);
+  }
+  return result;
+};
+
+/**
+ * Build a stateful heading renderer that assigns each heading an
+ * `id="section-NN"` and a `§ NN` mono eyebrow in document order. The
+ * counter is keyed by AST `node` identity rather than a plain
+ * increment: when react-markdown invokes the same heading twice in a
+ * row (StrictMode's double-render in dev, or any other repeated call)
+ * the second invocation finds its node in the Map and returns the same
+ * ordinal instead of bumping the count.
+ *
+ * `source` drives the visual style (so a `# …` lands with h1-prominent
+ * typography regardless of where the downgrade pushes its element);
+ * `target` is the actual rendered tag.
+ */
+const buildOrdinalHeading = (source: HeadingLevel, target: HeadingLevel): Components["h1"] => {
+  const ordinals = new Map<unknown, number>();
+  return function OrdinalHeading({
+    node,
+    children,
+    ...rest
+  }: HTMLAttributes<HTMLHeadingElement> & ExtraProps) {
+    let ordinal = ordinals.get(node);
+    if (ordinal === undefined) {
+      ordinal = ordinals.size + 1;
+      ordinals.set(node, ordinal);
+    }
+    const nn = String(ordinal).padStart(2, "0");
+    return createElement(
+      `h${target}`,
+      { id: `section-${nn}`, className: HEADING_CLASSES[source], ...rest },
+      <span
+        key="eyebrow"
+        aria-hidden="true"
+        className="mb-1.5 block font-mono text-xs tracking-widest text-ink-faint uppercase"
+      >
+        § {nn}
+      </span>,
+      children,
+    );
+  };
+};

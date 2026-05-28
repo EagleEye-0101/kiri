@@ -40,6 +40,11 @@ describe("<ArticlePage>", () => {
           contentMd: "# Hello\n\nFirst paragraph.\n\nSecond paragraph.\n",
           createdAt: new Date(NOW.getTime() - 30_000).toISOString(),
           workflowName: "pr-review",
+          heading: "Hello",
+          gitSha: "abc1234567890abcdef1234567890abcdef123456",
+          gitDirty: false,
+          startedAt: new Date(NOW.getTime() - 60_000).toISOString(),
+          finishedAt: new Date(NOW.getTime() - 30_000).toISOString(),
         }),
       ),
     );
@@ -49,21 +54,119 @@ describe("<ArticlePage>", () => {
     expect(
       await screen.findByRole("heading", { level: 2, name: "PR Review Digest" }),
     ).toBeDefined();
-    // The workflow name appears as kicker text above the title.
-    expect(screen.getByText("pr-review")).toBeDefined();
-    // The run-id chip links back to the run detail page.
-    const runLink = screen.getByRole("link", { name: /^run abc12345$/i });
-    expect(runLink.getAttribute("href")).toBe("/runs/abc12345-0000-0000-0000-000000000000");
+    // Workflow name appears once, inside the byline sentence as a link
+    // back to the workflow page.
+    const workflowLink = screen.getByRole("link", { name: "pr-review" });
+    expect(workflowLink.getAttribute("href")).toBe("/workflows/pr-review");
+    // Byline duration reads the run's lifecycle window — 60s → 30s = 30s.
+    expect(screen.getByText("30s")).toBeDefined();
+    // Short-form git sha; no (dirty) when gitDirty is false.
+    expect(screen.getByText("abc1234")).toBeDefined();
+    expect(screen.queryByText(/\(dirty\)/)).toBeNull();
+    // Secondary actions: open-run link to the run detail, copy markdown
+    // as a text link rather than a bordered button.
+    const openRun = screen.getByRole("link", { name: /open run/i });
+    expect(openRun.getAttribute("href")).toBe("/runs/abc12345-0000-0000-0000-000000000000");
+    expect(screen.getByRole("button", { name: /^copy markdown$/i })).toBeDefined();
     // Back link sits above the header.
     const backLink = screen.getByRole("link", { name: /back to run/i });
     expect(backLink.getAttribute("href")).toBe("/runs/abc12345-0000-0000-0000-000000000000");
-    // Markdown body is rendered through <Markdown> — headings and
-    // paragraphs both make it into the tree.
-    expect(screen.getByRole("heading", { level: 1, name: "Hello" })).toBeDefined();
+    // Body markdown headings demote by two so authored `# Hello` slots
+    // under the route's h2 title as an h3 element (with the visual
+    // prominence of an authored h1 preserved).
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    expect(screen.getByRole("heading", { level: 3, name: "Hello" })).toBeDefined();
     expect(screen.getByText(/First paragraph\./)).toBeDefined();
     expect(screen.getByText(/Second paragraph\./)).toBeDefined();
-    // Copy-to-clipboard button is wired in so the user can share the body.
-    expect(screen.getByRole("button", { name: /^copy$/i })).toBeDefined();
+  });
+
+  it("omits duration and git ref from the byline when the underlying fields are null", async () => {
+    server.use(
+      http.get("*/api/runs/:id/published/:name", ({ params }) =>
+        HttpResponse.json({
+          id: "art-1",
+          runId: params.id,
+          name: params.name,
+          title: "Sparse",
+          contentMd: "Body only, no heading.\n",
+          createdAt: NOW.toISOString(),
+          workflowName: "wf",
+          heading: null,
+          gitSha: null,
+          gitDirty: null,
+          startedAt: NOW.toISOString(),
+          finishedAt: null,
+        }),
+      ),
+    );
+
+    renderArticle("abc", "sparse");
+
+    expect(await screen.findByRole("heading", { level: 2, name: "Sparse" })).toBeDefined();
+    expect(screen.queryByText(/Body only/)).toBeDefined();
+    // Run hasn't finished — no duration appears in the byline.
+    expect(screen.queryByText(/\d+m \d+s|\d+(?:\.\d+)?s|\d+ms/)).toBeNull();
+    // Git context absent — no short sha, no (dirty).
+    expect(screen.queryByText(/\(dirty\)/)).toBeNull();
+  });
+
+  it("renders body `# section` markdown as h3 with section-NN ids and § NN eyebrows", async () => {
+    server.use(
+      http.get("*/api/runs/:id/published/:name", ({ params }) =>
+        HttpResponse.json({
+          id: "art-1",
+          runId: params.id,
+          name: params.name,
+          title: "Sectioned",
+          // Author writes `# Section` — the article surface demotes by two
+          // so the rendered element is an h3 carrying the section anchor.
+          contentMd: "# First section\n\nBody.\n\n# Second section\n\nMore.\n",
+          createdAt: NOW.toISOString(),
+          workflowName: "wf",
+          heading: "First section",
+          gitSha: null,
+          gitDirty: null,
+          startedAt: NOW.toISOString(),
+          finishedAt: null,
+        }),
+      ),
+    );
+
+    const { container } = renderArticle("abc", "sectioned");
+
+    expect(await screen.findByRole("heading", { level: 2, name: "Sectioned" })).toBeDefined();
+    expect(container.querySelector("h1")).toBeNull();
+    const bodyH3s = Array.from(container.querySelectorAll("h3[id^='section-']"));
+    expect(bodyH3s.map((h) => h.id)).toEqual(["section-01", "section-02"]);
+    expect(bodyH3s[0]?.querySelector("span[aria-hidden]")?.textContent).toBe("§ 01");
+    expect(bodyH3s[1]?.querySelector("span[aria-hidden]")?.textContent).toBe("§ 02");
+  });
+
+  it("renders the (dirty) marker when the run's working tree was dirty", async () => {
+    server.use(
+      http.get("*/api/runs/:id/published/:name", ({ params }) =>
+        HttpResponse.json({
+          id: "art-1",
+          runId: params.id,
+          name: params.name,
+          title: "Dirty Tree",
+          contentMd: "# h\n\nbody\n",
+          createdAt: NOW.toISOString(),
+          workflowName: "wf",
+          heading: "h",
+          gitSha: "abc1234567890abcdef1234567890abcdef123456",
+          gitDirty: true,
+          startedAt: new Date(NOW.getTime() - 5_000).toISOString(),
+          finishedAt: NOW.toISOString(),
+        }),
+      ),
+    );
+
+    renderArticle("abc", "dirty");
+
+    expect(await screen.findByRole("heading", { level: 2, name: "Dirty Tree" })).toBeDefined();
+    expect(screen.getByText("abc1234")).toBeDefined();
+    expect(screen.getByText(/\(dirty\)/)).toBeDefined();
   });
 
   it("renders the not-found view when the API returns 404", async () => {
@@ -121,6 +224,11 @@ describe("<ArticlePage>", () => {
                 contentMd: "second body\n",
                 createdAt: NOW.toISOString(),
                 workflowName: "wf",
+                heading: null,
+                gitSha: null,
+                gitDirty: null,
+                startedAt: NOW.toISOString(),
+                finishedAt: null,
               }),
             );
           }),
@@ -145,6 +253,11 @@ describe("<ArticlePage>", () => {
         contentMd: "stale\n",
         createdAt: NOW.toISOString(),
         workflowName: "wf",
+        heading: null,
+        gitSha: null,
+        gitDirty: null,
+        startedAt: NOW.toISOString(),
+        finishedAt: null,
       }),
     );
     await new Promise((resolve) => setTimeout(resolve, 20));
