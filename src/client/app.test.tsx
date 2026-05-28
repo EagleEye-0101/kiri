@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "bun:test";
-import { cleanup, render, screen } from "@testing-library/react";
+import { describe, expect, it } from "bun:test";
+import { render, screen } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
@@ -7,8 +7,6 @@ import { captureEventSources } from "../../tests/setup/fake-event-source.ts";
 import { flushAsync } from "../../tests/setup/flush-async.ts";
 import { server } from "../../tests/setup/msw.ts";
 import { App } from "./app.tsx";
-
-afterEach(() => cleanup());
 
 const renderAt = (path: string) => {
   const { hook } = memoryLocation({ path });
@@ -59,10 +57,16 @@ describe("<App>", () => {
     await flushAsync();
   });
 
-  it("shows the Recently Published rail on non-article routes", async () => {
+  it("shows the Recently Published rail on the home route", async () => {
     renderAt("/");
     expect(await screen.findByRole("heading", { name: /recently published/i })).toBeDefined();
     await flushAsync();
+  });
+
+  it("omits the Recently Published rail on the workflow route", async () => {
+    renderAt("/workflows/example");
+    await flushAsync();
+    expect(screen.queryByRole("heading", { name: /recently published/i })).toBeNull();
   });
 
   it("swaps the right rail for the article TOC on the article route", async () => {

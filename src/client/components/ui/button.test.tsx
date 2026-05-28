@@ -1,9 +1,7 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
-import { cleanup, render, screen } from "@testing-library/react";
+import { describe, expect, it, mock } from "bun:test";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Button } from "./button.tsx";
-
-afterEach(() => cleanup());
 
 describe("<Button>", () => {
   it("renders the children as the label by default", () => {
@@ -19,6 +17,11 @@ describe("<Button>", () => {
   it("exposes the danger variant via data-variant for destructive actions", () => {
     render(<Button variant="danger">delete</Button>);
     expect(screen.getByRole("button").getAttribute("data-variant")).toBe("danger");
+  });
+
+  it("exposes the solid variant via data-variant for a headline call-to-action", () => {
+    render(<Button variant="solid">run</Button>);
+    expect(screen.getByRole("button").getAttribute("data-variant")).toBe("solid");
   });
 
   it("fires onClick when the user clicks", async () => {

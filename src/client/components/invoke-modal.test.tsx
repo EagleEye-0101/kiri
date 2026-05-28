@@ -1,10 +1,8 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, mock } from "bun:test";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { WorkflowInputSummary } from "../api.ts";
 import { InvokeModal } from "./invoke-modal.tsx";
-
-afterEach(() => cleanup());
 
 const stubInputs = (overrides: Partial<WorkflowInputSummary>[] = []): WorkflowInputSummary[] => {
   if (overrides.length === 0) return [{ name: "pr_number", required: true }];
@@ -175,6 +173,17 @@ describe("<InvokeModal>", () => {
       const onCancel = mock(() => {});
       const { user } = renderModal({ onCancel });
       await user.click(screen.getByRole("heading", { level: 2 }));
+      expect(onCancel).not.toHaveBeenCalled();
+    });
+
+    it("does not call onCancel when the click lands on the content card's padding", () => {
+      const onCancel = mock(() => {});
+      renderModal({ onCancel });
+      // The padded wrapper sits inside the dialog, so a click on it bubbles
+      // up with target === the wrapper, not the dialog element — guarding
+      // against treating the card's own padding as a backdrop click.
+      const card = screen.getByRole("dialog").firstElementChild as HTMLElement;
+      fireEvent.click(card);
       expect(onCancel).not.toHaveBeenCalled();
     });
   });

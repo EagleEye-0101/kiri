@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "bun:test";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it } from "bun:test";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Router } from "wouter";
@@ -9,8 +9,6 @@ import { flushAsync } from "../../../tests/setup/flush-async.ts";
 import { server } from "../../../tests/setup/msw.ts";
 import { LiveEventsProvider } from "../events/live.tsx";
 import { WorkflowPage } from "./workflow-page.tsx";
-
-afterEach(() => cleanup());
 
 const renderWorkflow = (name: string, initialPath = `/workflows/${name}`) => {
   const memory = memoryLocation({ path: initialPath, record: true });
@@ -47,7 +45,51 @@ describe("<WorkflowPage>", () => {
     expect(
       await screen.findByRole("heading", { level: 2, name: /kiri-self-review/i }),
     ).toBeDefined();
-    expect(screen.getByRole("heading", { level: 3, name: /steps/i })).toBeDefined();
+    expect(screen.getByRole("tab", { name: "Recent runs" })).toBeDefined();
+  });
+
+  it("renders the workflow's recent runs as feed rows in the default tab", async () => {
+    const seenWorkflow: (string | null)[] = [];
+    server.use(
+      http.get("*/api/workflows", () =>
+        HttpResponse.json([
+          { name: "dev-patch", inputs: [{ name: "repo", required: true }], steps: [{ use: "x" }] },
+        ]),
+      ),
+      http.get("*/api/runs", ({ request }) => {
+        seenWorkflow.push(new URL(request.url).searchParams.get("workflow"));
+        return HttpResponse.json({
+          runs: [
+            {
+              id: "r1",
+              workflowName: "dev-patch",
+              status: "ok",
+              startedAt: "2026-05-09T12:00:00.000Z",
+              finishedAt: "2026-05-09T12:00:01.000Z",
+              error: null,
+              summary: null,
+              definitionSnapshot: { name: "dev-patch", steps: [] },
+              gitSha: null,
+              gitDirty: null,
+              inputs: { repo: "autoid-verify-service" },
+              isInterrupted: false,
+              articles: [],
+              recommendationsCount: 0,
+            },
+          ],
+          nextCursor: null,
+        });
+      }),
+    );
+
+    renderWorkflow("dev-patch");
+
+    const row = await screen.findByRole("link", { name: /autoid-verify-service/i });
+    expect(row.getAttribute("href")).toBe("/runs/r1");
+    // Both run-fed panels on the page (the feed and the stats snapshot)
+    // scope their fetches to this workflow.
+    expect(seenWorkflow.length).toBeGreaterThan(0);
+    expect(seenWorkflow.every((name) => name === "dev-patch")).toBe(true);
   });
 
   it("renders a not-found view when the registry has no workflow with that name", async () => {
@@ -140,18 +182,20 @@ describe("<WorkflowPage>", () => {
     server.use(
       http.get("*/api/workflows", () => {
         calls++;
-        return HttpResponse.json([{ name: "alpha", steps: [{ sh: `echo v${calls}` }] }]);
+        return HttpResponse.json([{ name: "alpha", steps: [{ use: `bundle-v${calls}` }] }]);
       }),
     );
 
-    const { sources } = renderWorkflow("alpha");
-    await screen.findByText(/sh: echo v1/);
+    // The Steps tab renders each step's title (the bundle reference for a
+    // use: step), so open the page there to observe the refetched step text.
+    const { sources } = renderWorkflow("alpha", "/workflows/alpha?tab=steps");
+    await screen.findByText("bundle-v1");
 
     act(() => {
       sources[0]?.emit({ type: "workflow.updated", name: "alpha" });
     });
 
-    await screen.findByText(/sh: echo v2/);
+    await screen.findByText("bundle-v2");
   });
 
   it("ignores workflow events for other names", async () => {
@@ -159,12 +203,12 @@ describe("<WorkflowPage>", () => {
     server.use(
       http.get("*/api/workflows", () => {
         calls++;
-        return HttpResponse.json([{ name: "alpha", steps: [{ sh: `echo v${calls}` }] }]);
+        return HttpResponse.json([{ name: "alpha", steps: [{ use: `bundle-v${calls}` }] }]);
       }),
     );
 
-    const { sources } = renderWorkflow("alpha");
-    await screen.findByText(/sh: echo v1/);
+    const { sources } = renderWorkflow("alpha", "/workflows/alpha?tab=steps");
+    await screen.findByText("bundle-v1");
 
     act(() => {
       sources[0]?.emit({ type: "workflow.updated", name: "beta" });
@@ -172,7 +216,7 @@ describe("<WorkflowPage>", () => {
     });
 
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(screen.getByText(/sh: echo v1/)).toBeDefined();
+    expect(screen.getByText("bundle-v1")).toBeDefined();
     expect(calls).toBe(1);
   });
 
@@ -187,7 +231,7 @@ describe("<WorkflowPage>", () => {
     // still percent-encoded because wouter uses `decodeURI`, which leaves
     // `%2F` alone. The page must decode before comparing against the API.
     const encoded = encodeURIComponent("examples/recommendations");
-    const { sources } = renderWorkflow(encoded, `/workflows/${encoded}`);
+    const { sources } = renderWorkflow(encoded, `/workflows/${encoded}?tab=steps`);
 
     expect(
       await screen.findByRole("heading", { level: 2, name: /examples\/recommendations/i }),
@@ -200,7 +244,7 @@ describe("<WorkflowPage>", () => {
       http.get("*/api/workflows", () => {
         calls++;
         return HttpResponse.json([
-          { name: "examples/recommendations", steps: [{ sh: `echo v${calls}` }] },
+          { name: "examples/recommendations", steps: [{ use: `bundle-v${calls}` }] },
         ]);
       }),
     );
@@ -209,7 +253,7 @@ describe("<WorkflowPage>", () => {
       sources[0]?.emit({ type: "workflow.updated", name: "examples/recommendations" });
     });
 
-    await screen.findByText(/sh: echo v1/);
+    await screen.findByText("bundle-v1");
   });
 
   it("falls back to the raw param when the URL contains a malformed escape", async () => {
