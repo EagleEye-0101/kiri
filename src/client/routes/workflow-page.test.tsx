@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "bun:test";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it } from "bun:test";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Router } from "wouter";
@@ -9,8 +9,6 @@ import { flushAsync } from "../../../tests/setup/flush-async.ts";
 import { server } from "../../../tests/setup/msw.ts";
 import { LiveEventsProvider } from "../events/live.tsx";
 import { WorkflowPage } from "./workflow-page.tsx";
-
-afterEach(() => cleanup());
 
 const renderWorkflow = (name: string, initialPath = `/workflows/${name}`) => {
   const memory = memoryLocation({ path: initialPath, record: true });
@@ -88,8 +86,10 @@ describe("<WorkflowPage>", () => {
 
     const row = await screen.findByRole("link", { name: /autoid-verify-service/i });
     expect(row.getAttribute("href")).toBe("/runs/r1");
-    // The feed scoped its fetch to this workflow.
-    expect(seenWorkflow).toEqual(["dev-patch"]);
+    // Both run-fed panels on the page (the feed and the stats snapshot)
+    // scope their fetches to this workflow.
+    expect(seenWorkflow.length).toBeGreaterThan(0);
+    expect(seenWorkflow.every((name) => name === "dev-patch")).toBe(true);
   });
 
   it("renders a not-found view when the registry has no workflow with that name", async () => {
