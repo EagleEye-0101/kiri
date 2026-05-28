@@ -208,7 +208,7 @@ export function RunDetailView({
               <StatusLabel status={status} />
             </dd>
           </div>
-          <span aria-hidden="true" className="text-rule">
+          <span aria-hidden="true" className="text-ink-faint">
             ·
           </span>
           <div className="flex items-baseline">
@@ -221,7 +221,7 @@ export function RunDetailView({
           </div>
           {run.finishedAt && (
             <>
-              <span aria-hidden="true" className="text-rule">
+              <span aria-hidden="true" className="text-ink-faint">
                 ·
               </span>
               <div className="flex items-baseline">
@@ -232,7 +232,7 @@ export function RunDetailView({
           )}
           {run.gitSha && (
             <>
-              <span aria-hidden="true" className="text-rule">
+              <span aria-hidden="true" className="text-ink-faint">
                 ·
               </span>
               <div className="flex items-baseline gap-1.5">
@@ -246,7 +246,7 @@ export function RunDetailView({
           )}
           {run.isInterrupted && (
             <>
-              <span aria-hidden="true" className="text-rule">
+              <span aria-hidden="true" className="text-ink-faint">
                 ·
               </span>
               <span className="italic">deleted</span>
@@ -461,9 +461,7 @@ function ActivityRow({ item }: { item: ActivityItem }) {
     <>
       <StatusStrip status={status} hoverGrow={!!row} />
       <span className={`shrink-0 font-mono text-xs tabular-nums ${metaClass}`}>{ordinalText}</span>
-      <span
-        className={`w-20 shrink-0 font-mono text-[10px] tracking-widest uppercase ${metaClass}`}
-      >
+      <span className={`w-20 shrink-0 font-mono text-xs tracking-widest uppercase ${metaClass}`}>
         {KIND_LABEL[kind]}
       </span>
       <span className={`min-w-0 flex-1 truncate font-mono text-sm ${titleClass}`}>{title}</span>

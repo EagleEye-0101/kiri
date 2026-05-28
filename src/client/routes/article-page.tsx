@@ -82,20 +82,19 @@ export function ArticlePage({
       <BackLink href={`/runs/${article.runId}`}>back to run</BackLink>
 
       <header className="mt-6">
-        <h2 className="font-display text-[76px] text-ink italic leading-[0.95] tracking-tight">
+        <h2 className="font-display text-7xl text-ink italic leading-[0.95] tracking-tight">
           {article.title}
         </h2>
 
         <div className="mt-7 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2 border-rule border-b pb-3.5 font-mono text-xs text-ink-muted">
           <p className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
-            <span>From the run on</span>
             <Link
               href={`/workflows/${article.workflowName}`}
-              className="font-medium text-ink no-underline transition-colors hover:text-accent focus-visible:text-accent"
+              className="font-medium text-ink underline decoration-1 decoration-ink-faint underline-offset-2 transition-colors hover:text-accent hover:decoration-accent focus-visible:text-accent focus-visible:decoration-accent"
             >
               {article.workflowName}
             </Link>
-            <span aria-hidden="true" className="text-rule">
+            <span aria-hidden="true" className="text-ink-faint">
               ·
             </span>
             <time dateTime={article.createdAt} title={article.createdAt}>
@@ -103,7 +102,7 @@ export function ArticlePage({
             </time>
             {article.finishedAt && (
               <>
-                <span aria-hidden="true" className="text-rule">
+                <span aria-hidden="true" className="text-ink-faint">
                   ·
                 </span>
                 <span className="tabular-nums">
@@ -113,29 +112,21 @@ export function ArticlePage({
             )}
             {article.gitSha && (
               <>
-                <span aria-hidden="true" className="text-rule">
+                <span aria-hidden="true" className="text-ink-faint">
                   ·
                 </span>
-                <span className="bg-paper px-1.5 py-0.5 tabular-nums" title={article.gitSha}>
+                <span className="tabular-nums" title={article.gitSha}>
                   {article.gitSha.slice(0, 7)}
                 </span>
-                {article.gitDirty && <span className="italic">(dirty)</span>}
+                {article.gitDirty && <span> (dirty)</span>}
               </>
             )}
           </p>
-          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-            <Link
-              href={`/runs/${article.runId}`}
-              className="text-accent no-underline transition-colors hover:text-ink focus-visible:text-ink"
-            >
-              open run
-            </Link>
-            <CopyButton content={article.contentMd} />
-          </div>
+          <CopyButton content={article.contentMd} />
         </div>
       </header>
 
-      <div className="mt-10">
+      <div className="mt-10 font-display [&_p]:leading-8">
         <Markdown content={article.contentMd} withSectionOrdinals downgradeHeaderLevels={2} />
       </div>
     </article>
