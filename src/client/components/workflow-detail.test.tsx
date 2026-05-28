@@ -36,11 +36,6 @@ const renderDetail = async (
   return result;
 };
 
-// The structured definition (steps, publish, summariser) lives in the
-// YAML definition tab, so these specs open the page on that tab.
-const renderDefinition = async (workflow: WorkflowSummary) =>
-  await renderDetail(workflow, undefined, "yaml");
-
 describe("<WorkflowDetailView>", () => {
   describe("hero", () => {
     it("renders the workflow name as a level-2 heading", async () => {
@@ -105,246 +100,276 @@ describe("<WorkflowDetailView>", () => {
       // empty state for a workflow with no runs.
       expect(await screen.findByText(/no runs yet/i)).toBeDefined();
     });
+  });
 
-    it("hides the definition while the Recent runs tab is active", async () => {
-      await renderDetail(stubWorkflow());
-      expect(screen.queryByRole("heading", { level: 3, name: /^steps$/i })).toBeNull();
-    });
-
-    it("renders placeholder copy on the Inputs tab", async () => {
+  describe("inputs tab", () => {
+    it("renders an empty state when the workflow declares no inputs", async () => {
       await renderDetail(stubWorkflow(), undefined, "inputs");
-      expect(screen.getByText(/the inputs view is coming soon/i)).toBeDefined();
+      expect(screen.getByText(/declares no inputs/i)).toBeDefined();
     });
 
-    it("renders placeholder copy on the Steps tab", async () => {
-      await renderDetail(stubWorkflow(), undefined, "steps");
-      expect(screen.getByText(/the steps view is coming soon/i)).toBeDefined();
+    it("renders one row per declared input with its name", async () => {
+      await renderDetail(
+        stubWorkflow({
+          inputs: [{ name: "repo", required: true }, { name: "model" }],
+        }),
+        undefined,
+        "inputs",
+      );
+      expect(screen.getByText("repo")).toBeDefined();
+      expect(screen.getByText("model")).toBeDefined();
     });
 
-    it("renders placeholder copy on the Summariser tab", async () => {
-      await renderDetail(stubWorkflow(), undefined, "summariser");
-      expect(screen.getByText(/the summariser view is coming soon/i)).toBeDefined();
+    it("marks a required input as required and an optional one as opt", async () => {
+      await renderDetail(
+        stubWorkflow({
+          inputs: [{ name: "repo", required: true }, { name: "model" }],
+        }),
+        undefined,
+        "inputs",
+      );
+      expect(screen.getByText("required")).toBeDefined();
+      expect(screen.getByText("opt")).toBeDefined();
     });
 
-    it("shows the definition body on the YAML definition tab", async () => {
-      await renderDetail(stubWorkflow({ steps: [{ sh: "echo hi" }] }), undefined, "yaml");
-      expect(screen.getByRole("heading", { level: 3, name: /^steps$/i })).toBeDefined();
+    it("renders the derived type as enum for a picklist input and string otherwise", async () => {
+      await renderDetail(
+        stubWorkflow({
+          inputs: [{ name: "env", options: ["dev", "prod"] }, { name: "model" }],
+        }),
+        undefined,
+        "inputs",
+      );
+      expect(screen.getByText("enum")).toBeDefined();
+      expect(screen.getByText("string")).toBeDefined();
+    });
+
+    it("renders the default value when one is declared", async () => {
+      await renderDetail(
+        stubWorkflow({ inputs: [{ name: "model", default: "sonnet" }] }),
+        undefined,
+        "inputs",
+      );
+      expect(screen.getByText("sonnet")).toBeDefined();
+    });
+
+    it("renders the description when one is declared", async () => {
+      await renderDetail(
+        stubWorkflow({
+          inputs: [{ name: "repo", description: "owner/name of the repository" }],
+        }),
+        undefined,
+        "inputs",
+      );
+      expect(screen.getByText("owner/name of the repository")).toBeDefined();
     });
   });
 
-  describe("steps", () => {
-    it("renders the singular step count when there is exactly one step", async () => {
-      await renderDefinition(stubWorkflow({ steps: [{ sh: "echo one" }] }));
-      expect(screen.getByText(/^1 step$/i)).toBeDefined();
+  describe("steps tab", () => {
+    it("renders an empty state when the workflow declares no steps", async () => {
+      await renderDetail(stubWorkflow({ steps: [] }), undefined, "steps");
+      expect(screen.getByText(/declares no steps/i)).toBeDefined();
     });
 
-    it("renders the plural step count for multi-step workflows", async () => {
-      await renderDefinition(
-        stubWorkflow({ steps: [{ sh: "echo a" }, { sh: "echo b" }, { sh: "echo c" }] }),
+    it("numbers steps with a two-digit ordinal in declared order", async () => {
+      await renderDetail(
+        stubWorkflow({ steps: [{ use: "claude-code" }, { sh: "echo done" }] }),
+        undefined,
+        "steps",
       );
-      expect(screen.getByText(/^3 steps$/i)).toBeDefined();
-    });
-
-    it("renders an empty-state sentence when no steps are defined", async () => {
-      await renderDefinition(stubWorkflow({ steps: [] }));
-      expect(screen.getByText(/no steps defined/i)).toBeDefined();
-    });
-
-    it("renders the step number padded to two digits", async () => {
-      await renderDefinition(stubWorkflow({ steps: [{ sh: "echo hi" }] }));
       expect(screen.getByText("01")).toBeDefined();
+      expect(screen.getByText("02")).toBeDefined();
     });
 
-    it("labels a use: step with the bundle name", async () => {
-      await renderDefinition(stubWorkflow({ steps: [{ use: "claude-code" }] }));
-      expect(screen.getByText("use: claude-code")).toBeDefined();
+    it("renders a use: step as kind use with the bundle reference as the title", async () => {
+      await renderDetail(stubWorkflow({ steps: [{ use: "claude-code" }] }), undefined, "steps");
+      expect(screen.getByText("use")).toBeDefined();
+      expect(screen.getByText("claude-code")).toBeDefined();
     });
 
-    it("labels a sh: step with the first line of the source", async () => {
-      await renderDefinition(stubWorkflow({ steps: [{ sh: "echo hello\nexit 0" }] }));
-      expect(screen.getByText(/^sh: echo hello$/)).toBeDefined();
-    });
-
-    it("truncates long sh: labels", async () => {
-      const longLine = "a".repeat(80);
-      await renderDefinition(stubWorkflow({ steps: [{ sh: longLine }] }));
-      // 60-char truncation + ellipsis.
-      expect(screen.getByText(/^sh: a{60}…$/)).toBeDefined();
-    });
-
-    it("renders the inline source for sh: steps", async () => {
-      await renderDefinition(stubWorkflow({ steps: [{ sh: "echo materials body\nexit 0" }] }));
-      const sourceHeading = screen.getByText(/^source$/i);
-      const sourcePanel = sourceHeading.parentElement;
-      expect(sourcePanel?.textContent).toContain("echo materials body");
-      expect(sourcePanel?.textContent).toContain("exit 0");
-    });
-
-    it("renders an env block for use: steps that declare env", async () => {
-      await renderDefinition(
-        stubWorkflow({
-          steps: [{ use: "claude-code", env: { PROMPT_FILE: "prompts/x.tpl", MAX_TURNS: "8" } }],
-        }),
+    it("renders an sh: step as kind sh with the first non-empty line as the title", async () => {
+      await renderDetail(
+        stubWorkflow({ steps: [{ sh: "\n\n  echo hello\nexit 0" }] }),
+        undefined,
+        "steps",
       );
-      expect(screen.getByText(/^env$/i)).toBeDefined();
-      expect(screen.getByText("PROMPT_FILE")).toBeDefined();
-      expect(screen.getByText("prompts/x.tpl")).toBeDefined();
-      expect(screen.getByText("MAX_TURNS")).toBeDefined();
-      expect(screen.getByText("8")).toBeDefined();
+      expect(screen.getByText("sh")).toBeDefined();
+      expect(screen.getByText("echo hello")).toBeDefined();
     });
 
-    it("sorts env keys alphabetically", async () => {
-      const { container } = await renderDefinition(
-        stubWorkflow({
-          steps: [{ use: "claude-code", env: { ZED: "z", ALPHA: "a", MID: "m" } }],
-        }),
+    it("truncates a long sh: title", async () => {
+      await renderDetail(stubWorkflow({ steps: [{ sh: "a".repeat(80) }] }), undefined, "steps");
+      expect(screen.getByText(/^a{60}…$/)).toBeDefined();
+    });
+
+    it("renders the step description when set", async () => {
+      await renderDetail(
+        stubWorkflow({ steps: [{ use: "claude-code", description: "review the open PR" }] }),
+        undefined,
+        "steps",
       );
-      const keys = Array.from(container.querySelectorAll("dt"))
-        .map((dt) => dt.textContent)
-        .filter((label) => label && /^[A-Z]/.test(label));
-      expect(keys).toEqual(["ALPHA", "MID", "ZED"]);
-    });
-
-    it("omits the env block when a use: step has no env map", async () => {
-      await renderDefinition(stubWorkflow({ steps: [{ use: "claude-code" }] }));
-      expect(screen.queryByText(/^env$/i)).toBeNull();
-    });
-
-    it("omits the env block when a use: step's env is empty", async () => {
-      await renderDefinition(stubWorkflow({ steps: [{ use: "claude-code", env: {} }] }));
-      expect(screen.queryByText(/^env$/i)).toBeNull();
-    });
-
-    it("renders an env value pointing at a workflow input in YAML ref form", async () => {
-      await renderDefinition(
-        stubWorkflow({
-          inputs: [{ name: "pr_number", required: true }],
-          steps: [{ use: "claude-code", env: { PR_NUMBER: { input: "pr_number" } } }],
-        }),
-      );
-      expect(screen.getByText("PR_NUMBER")).toBeDefined();
-      expect(screen.getByText("{ input: pr_number }")).toBeDefined();
-    });
-
-    it("renders both source and env for sh: steps that declare env", async () => {
-      await renderDefinition(
-        stubWorkflow({
-          steps: [{ sh: "echo $GREETING", env: { GREETING: "hi" } }],
-        }),
-      );
-      expect(screen.getByText(/^source$/i)).toBeDefined();
-      expect(screen.getByText(/^env$/i)).toBeDefined();
-      expect(screen.getByText("GREETING")).toBeDefined();
-    });
-
-    it("renders the description block when a step declares one", async () => {
-      await renderDefinition(
-        stubWorkflow({
-          steps: [{ use: "claude-code", description: "review the open PR" }],
-        }),
-      );
-      expect(screen.getByText(/^description$/i)).toBeDefined();
       expect(screen.getByText("review the open PR")).toBeDefined();
     });
 
-    it("omits the description block when a step has no description", async () => {
-      await renderDefinition(stubWorkflow({ steps: [{ use: "claude-code" }] }));
+    it("omits the description block when a step declares none", async () => {
+      await renderDetail(stubWorkflow({ steps: [{ use: "claude-code" }] }), undefined, "steps");
       expect(screen.queryByText(/^description$/i)).toBeNull();
+    });
+
+    it("renders the inline source for an sh: step", async () => {
+      await renderDetail(
+        stubWorkflow({ steps: [{ sh: "echo materials\nexit 0" }] }),
+        undefined,
+        "steps",
+      );
+      const sourcePanel = screen.getByText(/^source$/i).parentElement;
+      expect(sourcePanel?.textContent).toContain("echo materials");
+      expect(sourcePanel?.textContent).toContain("exit 0");
+    });
+
+    it("renders the env block for a step that declares env", async () => {
+      await renderDetail(
+        stubWorkflow({ steps: [{ use: "claude-code", env: { MODEL: "sonnet" } }] }),
+        undefined,
+        "steps",
+      );
+      expect(screen.getByText(/^env$/i)).toBeDefined();
+      expect(screen.getByText("MODEL")).toBeDefined();
+      expect(screen.getByText("sonnet")).toBeDefined();
     });
   });
 
-  describe("publish", () => {
-    it("does not render the publish section when the workflow has no publish entries", async () => {
-      await renderDefinition(stubWorkflow());
-      expect(screen.queryByRole("heading", { level: 3, name: /^publish$/i })).toBeNull();
+  describe("source panel", () => {
+    it("shows a short sh: source in full with no expand toggle", async () => {
+      await renderDetail(stubWorkflow({ steps: [{ sh: "echo hi\nexit 0" }] }), undefined, "steps");
+      expect(screen.queryByRole("button", { name: /expand|collapse/i })).toBeNull();
     });
 
-    it("renders the publish section with a heading and per-entry rows for use: entries", async () => {
-      await renderDefinition(
-        stubWorkflow({
-          publish: [
-            { name: "pr-digest", title: "PR Digest", use: "claude-code" },
-            { name: "weekly-report", title: "Weekly Report", use: "claude-code" },
-          ],
-        }),
+    it("collapses a long sh: source behind a toggle that expands and re-collapses", async () => {
+      const user = userEvent.setup();
+      const longSource = Array.from({ length: 20 }, (_, i) => `echo line ${i}`).join("\n");
+      await renderDetail(stubWorkflow({ steps: [{ sh: longSource }] }), undefined, "steps");
+
+      await user.click(screen.getByRole("button", { name: "expand" }));
+      expect(screen.getByRole("button", { name: "collapse" })).toBeDefined();
+
+      await user.click(screen.getByRole("button", { name: "collapse" }));
+      expect(screen.getByRole("button", { name: "expand" })).toBeDefined();
+    });
+  });
+
+  describe("summariser tab", () => {
+    it("renders an empty state when the workflow has no summariser", async () => {
+      await renderDetail(stubWorkflow(), undefined, "summariser");
+      expect(screen.getByText(/no summariser configured/i)).toBeDefined();
+    });
+
+    it("renders a use: summariser as kind use with the bundle reference as the title", async () => {
+      await renderDetail(
+        stubWorkflow({ summarize: { use: "claude-code-summarizer" } }),
+        undefined,
+        "summariser",
       );
-      expect(screen.getByRole("heading", { level: 3, name: /^publish$/i })).toBeDefined();
-      expect(screen.getByRole("heading", { level: 4, name: /^PR Digest$/ })).toBeDefined();
-      expect(screen.getByRole("heading", { level: 4, name: /^Weekly Report$/ })).toBeDefined();
-      // Both entries surface their source label and keyed kebab-case name.
-      expect(screen.getAllByText(/^use: claude-code$/)).toHaveLength(2);
-      expect(screen.getByText(/^name: pr-digest$/)).toBeDefined();
-      expect(screen.getByText(/^name: weekly-report$/)).toBeDefined();
+      expect(screen.getByText("use")).toBeDefined();
+      expect(screen.getByText("claude-code-summarizer")).toBeDefined();
     });
 
-    it("renders the truncated first line of an sh: publish entry as its source label", async () => {
-      await renderDefinition(
-        stubWorkflow({
-          publish: [{ name: "report", title: "Report", sh: "echo line 1\nexit 0" }],
-        }),
+    it("renders an sh: summariser as kind sh with the first non-empty line as the title", async () => {
+      await renderDetail(
+        stubWorkflow({ summarize: { sh: "\necho summarising\nexit 0" } }),
+        undefined,
+        "summariser",
       );
-      expect(screen.getByText(/^sh: echo line 1$/)).toBeDefined();
+      expect(screen.getByText("sh")).toBeDefined();
+      expect(screen.getByText("echo summarising")).toBeDefined();
     });
 
-    it("shows the singular article count for a single publish entry", async () => {
-      await renderDefinition(
-        stubWorkflow({
-          publish: [{ name: "digest", title: "Digest", use: "claude-code" }],
-        }),
+    it("renders the inline source for an sh: summariser", async () => {
+      await renderDetail(
+        stubWorkflow({ summarize: { sh: "echo summarising\nexit 0" } }),
+        undefined,
+        "summariser",
       );
-      expect(screen.getByText(/^1 article$/)).toBeDefined();
+      const sourcePanel = screen.getByText(/^source$/i).parentElement;
+      expect(sourcePanel?.textContent).toContain("echo summarising");
+      expect(sourcePanel?.textContent).toContain("exit 0");
     });
 
-    it("shows the plural article count for multiple publish entries", async () => {
-      await renderDefinition(
+    it("renders the summariser description when set", async () => {
+      await renderDetail(
         stubWorkflow({
-          publish: [
-            { name: "a", title: "A", sh: "echo a" },
-            { name: "b", title: "B", sh: "echo b" },
-            { name: "c", title: "C", sh: "echo c" },
-          ],
+          summarize: { use: "claude-code-summarizer", description: "one-line digest of the run" },
         }),
+        undefined,
+        "summariser",
       );
-      expect(screen.getByText(/^3 articles$/)).toBeDefined();
+      expect(screen.getByText("one-line digest of the run")).toBeDefined();
     });
 
-    it("renders inline source for sh: publish entries", async () => {
-      await renderDefinition(
+    it("renders the env map with input references in YAML ref form", async () => {
+      await renderDetail(
         stubWorkflow({
-          // Override the default sh: step so the only "source" block on
-          // screen is the one under the publish entry.
-          steps: [{ use: "noop" }],
+          inputs: [{ name: "model", default: "sonnet" }],
+          summarize: {
+            use: "claude-code-summarizer",
+            env: { MODEL: { input: "model" }, PROMPT: "summarise" },
+          },
+        }),
+        undefined,
+        "summariser",
+      );
+      expect(screen.getByText(/^env$/i)).toBeDefined();
+      expect(screen.getByText("MODEL")).toBeDefined();
+      expect(screen.getByText("{ input: model }")).toBeDefined();
+      expect(screen.getByText("PROMPT")).toBeDefined();
+      expect(screen.getByText("summarise")).toBeDefined();
+    });
+
+    it("omits the env block when the summariser declares no env", async () => {
+      await renderDetail(
+        stubWorkflow({ summarize: { use: "claude-code-summarizer" } }),
+        undefined,
+        "summariser",
+      );
+      expect(screen.queryByText(/^env$/i)).toBeNull();
+    });
+  });
+
+  describe("publishes tab", () => {
+    it("renders an empty state when the workflow publishes nothing", async () => {
+      await renderDetail(stubWorkflow(), undefined, "publishes");
+      expect(screen.getByText(/publishes no articles/i)).toBeDefined();
+    });
+
+    it("renders a row per entry with its title, name, kind, and source reference", async () => {
+      await renderDetail(
+        stubWorkflow({
+          publish: [{ name: "pr-digest", title: "PR Digest", use: "claude-code" }],
+        }),
+        undefined,
+        "publishes",
+      );
+      expect(screen.getByRole("heading", { level: 4, name: "PR Digest" })).toBeDefined();
+      expect(screen.getByText("pr-digest")).toBeDefined();
+      expect(screen.getByText("use")).toBeDefined();
+      expect(screen.getByText("claude-code")).toBeDefined();
+    });
+
+    it("renders the inline source for an sh: publish entry", async () => {
+      await renderDetail(
+        stubWorkflow({
           publish: [{ name: "report", title: "Report", sh: "echo body\nexit 0" }],
         }),
+        undefined,
+        "publishes",
       );
-      const sourceHeading = screen.getByText(/^source$/i);
-      const sourcePanel = sourceHeading.parentElement;
+      const sourcePanel = screen.getByText(/^source$/i).parentElement;
       expect(sourcePanel?.textContent).toContain("echo body");
       expect(sourcePanel?.textContent).toContain("exit 0");
     });
 
-    it("renders the env block for publish entries that declare env", async () => {
-      await renderDefinition(
-        stubWorkflow({
-          publish: [
-            {
-              name: "digest",
-              title: "Digest",
-              use: "claude-code",
-              env: { PROMPT_FILE: "prompts/x.tpl", MODEL: "sonnet" },
-            },
-          ],
-        }),
-      );
-      expect(screen.getByText(/^env$/i)).toBeDefined();
-      expect(screen.getByText("PROMPT_FILE")).toBeDefined();
-      expect(screen.getByText("prompts/x.tpl")).toBeDefined();
-      expect(screen.getByText("MODEL")).toBeDefined();
-      expect(screen.getByText("sonnet")).toBeDefined();
-    });
-
-    it("renders the description block when a publish entry declares one", async () => {
-      await renderDefinition(
+    it("renders the description and env blocks when an entry declares them", async () => {
+      await renderDetail(
         stubWorkflow({
           publish: [
             {
@@ -352,74 +377,17 @@ describe("<WorkflowDetailView>", () => {
               title: "Digest",
               description: "a long-form summary of the top stories",
               use: "claude-code",
+              env: { MODEL: "sonnet" },
             },
           ],
         }),
+        undefined,
+        "publishes",
       );
-      expect(screen.getByText(/^description$/i)).toBeDefined();
       expect(screen.getByText("a long-form summary of the top stories")).toBeDefined();
-    });
-  });
-
-  describe("summarise", () => {
-    it("does not render the summarise section when the workflow has no summarize step", async () => {
-      await renderDefinition(stubWorkflow());
-      expect(screen.queryByRole("heading", { level: 3, name: /^summarise$/i })).toBeNull();
-    });
-
-    it("renders the summarise section with the use: source label", async () => {
-      await renderDefinition(stubWorkflow({ summarize: { use: "claude-code-summarizer" } }));
-      expect(screen.getByRole("heading", { level: 3, name: /^summarise$/i })).toBeDefined();
-      expect(screen.getByText(/^use: claude-code-summarizer$/)).toBeDefined();
-    });
-
-    it("renders the summarise section with the truncated first line of an sh: step", async () => {
-      await renderDefinition(stubWorkflow({ summarize: { sh: "echo summarising\nexit 0" } }));
-      expect(screen.getByRole("heading", { level: 3, name: /^summarise$/i })).toBeDefined();
-      expect(screen.getByText(/^sh: echo summarising$/)).toBeDefined();
-    });
-
-    it("renders inline source for an sh: summariser", async () => {
-      await renderDefinition(
-        stubWorkflow({
-          // Override the default sh: step so the only "source" block on
-          // screen is the summariser's.
-          steps: [{ use: "noop" }],
-          summarize: { sh: "echo summarising\nexit 0" },
-        }),
-      );
-      const sourceHeading = screen.getByText(/^source$/i);
-      const sourcePanel = sourceHeading.parentElement;
-      expect(sourcePanel?.textContent).toContain("echo summarising");
-      expect(sourcePanel?.textContent).toContain("exit 0");
-    });
-
-    it("renders the env block for a summariser that declares env", async () => {
-      await renderDefinition(
-        stubWorkflow({
-          summarize: {
-            use: "claude-code-summarizer",
-            env: { MODEL: "haiku", PROMPT: "summarise" },
-          },
-        }),
-      );
       expect(screen.getByText(/^env$/i)).toBeDefined();
       expect(screen.getByText("MODEL")).toBeDefined();
-      expect(screen.getByText("haiku")).toBeDefined();
-      expect(screen.getByText("PROMPT")).toBeDefined();
-    });
-
-    it("renders the description block when the summariser declares one", async () => {
-      await renderDefinition(
-        stubWorkflow({
-          summarize: {
-            use: "claude-code-summarizer",
-            description: "one-line digest of the run",
-          },
-        }),
-      );
-      expect(screen.getByText(/^description$/i)).toBeDefined();
-      expect(screen.getByText("one-line digest of the run")).toBeDefined();
+      expect(screen.getByText("sonnet")).toBeDefined();
     });
   });
 
