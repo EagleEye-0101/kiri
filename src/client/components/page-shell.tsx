@@ -1,9 +1,9 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { type WorkflowSummary, fetchWorkflows } from "../api.ts";
+import { Rule } from "../design-system/content/rule.tsx";
+import { type NavItem, NavList } from "../design-system/navigation/nav-list.tsx";
 import { useLiveSync } from "../events/live.tsx";
-import { Rule } from "./design-system/content/rule.tsx";
-import { type NavItem, NavList } from "./design-system/navigation/nav-list.tsx";
 import { VersionInfo } from "./version-info.tsx";
 import { WorkflowsNav } from "./workflows-nav.tsx";
 
@@ -28,7 +28,7 @@ const activeWorkflowName = (location: string): string | null => {
  * rail whose contents the caller supplies via `rightAside`. Below the
  * `lg` breakpoint the grid collapses to a single column.
  *
- * `rightAside` is the per-route marginalia slot — the home dashboard
+ * `rightAside` is the per-route marginalia slot — the home page
  * passes `<RecentlyPublished>`, the article route passes its
  * `<ArticleAside>` TOC, and other routes pass nothing. When omitted the
  * right column renders empty so the centre column keeps a stable width
@@ -59,8 +59,8 @@ export function PageShell({
         setWorkflows(all);
       })
       .catch(() => {
-        // Side-nav is non-essential chrome; the dashboard and workflow
-        // page surface fetch errors prominently. Hide the nav on failure
+        // Side-nav is non-essential chrome; the home and workflow
+        // pages surface fetch errors prominently. Hide the nav on failure
         // rather than show a misleading empty state.
       });
   }, []);
