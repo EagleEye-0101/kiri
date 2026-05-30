@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "../design-system/actions/button.tsx";
 import { Select } from "../design-system/actions/select.tsx";
+import { TextInput } from "../design-system/actions/text-input.tsx";
 import { Sparkline, type SparklineBar } from "../design-system/charts/sparkline.tsx";
 import { Code, CodeBlock } from "../design-system/content/code.tsx";
 import { Disclosure } from "../design-system/content/disclosure.tsx";
@@ -113,19 +114,30 @@ const TYPE_SCALE = [
 function SelectDemo() {
   const [cadence, setCadence] = useState("daily");
   return (
-    <div className="flex flex-col gap-1.5">
-      <label
-        htmlFor="ds-select-cadence"
-        className="font-mono text-xs tracking-widest text-ink-muted uppercase"
-      >
-        Cadence
-      </label>
-      <Select id="ds-select-cadence" value={cadence} onChange={setCadence}>
-        <option value="daily">daily</option>
-        <option value="weekly">weekly</option>
-        <option value="monthly">monthly</option>
-      </Select>
-    </div>
+    <Select
+      label="Cadence"
+      description="How often the workflow runs on its own."
+      value={cadence}
+      onChange={setCadence}
+    >
+      <option value="daily">daily</option>
+      <option value="weekly">weekly</option>
+      <option value="monthly">monthly</option>
+    </Select>
+  );
+}
+
+// Interactive specimen for the TextInput control, which owns its controlled value.
+function TextInputDemo() {
+  const [topic, setTopic] = useState("");
+  return (
+    <TextInput
+      label="Topic"
+      description="An optional focus for the briefing."
+      placeholder="e.g. semiconductors"
+      value={topic}
+      onChange={setTopic}
+    />
   );
 }
 
@@ -888,14 +900,39 @@ export function DesignSystemContent() {
                 The form control for choosing one value from a fixed set — a styled wrapper over the
                 native <Code>select</Code>, so keyboard, type-ahead, and the platform picker all
                 come for free. Write the <Code>option</Code> elements as children and drive it with{" "}
-                <Code>value</Code> / <Code>onChange</Code>. It is the control alone; pair it with a{" "}
-                <Code>label</Code> for the field. Reach for a select only for a short, fixed list —
-                a long or open-ended set wants a different control.
+                <Code>value</Code> / <Code>onChange</Code>. Pass a <Code>label</Code> to render the
+                field lockup — the label, an optional <Code>description</Code> help line, and a{" "}
+                <Code>required</Code> marker, all wired for assistive tech — or omit it for the bare
+                control. Reach for a select only for a short, fixed list — a long or open-ended set
+                wants a different control.
               </p>
             </Prose>
             <div className="mt-5">
               <Card>
                 <SelectDemo />
+              </Card>
+            </div>
+          </article>
+
+          <article>
+            <h4 className="font-mono text-base text-ink">Text input</h4>
+            <p className="mt-1 font-mono text-xs text-ink-faint">
+              <span className="text-ink-muted">TextInput</span> ·
+              design-system/actions/text-input.tsx
+            </p>
+            <Prose>
+              <p className="mt-3">
+                The single-line text field — a styled wrapper over the native <Code>input</Code>,
+                controlled with <Code>value</Code> / <Code>onChange</Code>. Like the select, it
+                shares the field lockup: pass a <Code>label</Code> and it renders the label, an
+                optional <Code>description</Code> help line, and a <Code>required</Code> marker, all
+                wired so the label and help text are announced together. Omit the label for the bare
+                control when the caller owns the labelling.
+              </p>
+            </Prose>
+            <div className="mt-5">
+              <Card>
+                <TextInputDemo />
               </Card>
             </div>
           </article>
