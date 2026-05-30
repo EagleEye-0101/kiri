@@ -18,32 +18,37 @@ const setupWithClipboard = (writeText: (text: string) => Promise<void>) => {
 };
 
 describe("<CopyButton>", () => {
-  it("renders an idle 'copy markdown' button on first mount", () => {
+  it("renders an idle button with the default 'copy' label on first mount", () => {
     render(<CopyButton content="hello" />);
+    expect(screen.getByRole("button", { name: /^copy$/i })).toBeDefined();
+  });
+
+  it("uses the supplied label so the action can name what it copies", () => {
+    render(<CopyButton content="hello" label="copy markdown" />);
     expect(screen.getByRole("button", { name: /^copy markdown$/i })).toBeDefined();
   });
 
-  it("writes the content to the clipboard and shows 'copied' on click", async () => {
+  it("writes the content to the clipboard and shows the copied label on click", async () => {
     const writeText = mock(async (_text: string) => {});
     const user = setupWithClipboard(writeText);
 
     render(<CopyButton content={"# Title\n\nBody."} feedbackMs={20} />);
 
-    await user.click(screen.getByRole("button", { name: /^copy markdown$/i }));
+    await user.click(screen.getByRole("button", { name: /^copy$/i }));
 
     expect(writeText.mock.calls).toEqual([["# Title\n\nBody."]]);
     expect(await screen.findByRole("button", { name: /^copied$/i })).toBeDefined();
   });
 
-  it("reverts the label back to 'copy markdown' once the feedback window elapses", async () => {
+  it("reverts the label back to idle once the feedback window elapses", async () => {
     const user = setupWithClipboard(async () => {});
     render(<CopyButton content="hello" feedbackMs={20} />);
 
-    await user.click(screen.getByRole("button", { name: /^copy markdown$/i }));
+    await user.click(screen.getByRole("button", { name: /^copy$/i }));
     expect(await screen.findByRole("button", { name: /^copied$/i })).toBeDefined();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /^copy markdown$/i })).toBeDefined();
+      expect(screen.getByRole("button", { name: /^copy$/i })).toBeDefined();
     });
   });
 
@@ -53,12 +58,12 @@ describe("<CopyButton>", () => {
     });
     render(<CopyButton content="hello" feedbackMs={20} />);
 
-    await user.click(screen.getByRole("button", { name: /^copy markdown$/i }));
+    await user.click(screen.getByRole("button", { name: /^copy$/i }));
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("clipboard denied");
-    // Label stays on "copy markdown" so the user can retry immediately.
-    expect(screen.getByRole("button", { name: /^copy markdown$/i })).toBeDefined();
+    // Label stays on the idle action so the user can retry immediately.
+    expect(screen.getByRole("button", { name: /^copy$/i })).toBeDefined();
   });
 
   it("stringifies non-Error rejections so the message is still readable", async () => {
@@ -67,7 +72,7 @@ describe("<CopyButton>", () => {
     });
     render(<CopyButton content="hello" feedbackMs={20} />);
 
-    await user.click(screen.getByRole("button", { name: /^copy markdown$/i }));
+    await user.click(screen.getByRole("button", { name: /^copy$/i }));
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("nope");

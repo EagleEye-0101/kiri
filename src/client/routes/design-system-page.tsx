@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button } from "../design-system/actions/button.tsx";
+import { CopyButton } from "../design-system/actions/copy-button.tsx";
 import { Select } from "../design-system/actions/select.tsx";
 import { TextInput } from "../design-system/actions/text-input.tsx";
 import { Sparkline, type SparklineBar } from "../design-system/charts/sparkline.tsx";
@@ -9,6 +10,7 @@ import { EmptyState } from "../design-system/content/empty-state.tsx";
 import { HeadlineLink } from "../design-system/content/headline-link.tsx";
 import { InlineLink } from "../design-system/content/inline-link.tsx";
 import { List } from "../design-system/content/list.tsx";
+import { LoadingState } from "../design-system/content/loading-state.tsx";
 import { Markdown } from "../design-system/content/markdown.tsx";
 import { Meta } from "../design-system/content/meta.tsx";
 import { Prose } from "../design-system/content/prose.tsx";
@@ -838,6 +840,29 @@ export function DesignSystemContent() {
               </Card>
             </div>
           </article>
+
+          <article>
+            <h4 className="font-mono text-base text-ink">Loading state</h4>
+            <p className="mt-1 font-mono text-xs text-ink-faint">
+              <span className="text-ink-muted">LoadingState</span> ·
+              design-system/content/loading-state.tsx
+            </p>
+            <Prose>
+              <p className="mt-3">
+                The loading twin of the empty state — the same muted, italic line, but rendered as
+                an <Code>output</Code> with <Code>role="status"</Code> so assistive tech announces
+                the body settling, and given a slow shimmer to signal liveness (it stills under{" "}
+                <Code>prefers-reduced-motion</Code>). Reach for it while a surface's content is
+                mid-fetch; swap to the real content, or an <Code>EmptyState</Code>, once it
+                resolves.
+              </p>
+            </Prose>
+            <div className="mt-5">
+              <Card>
+                <LoadingState>Loading workflow…</LoadingState>
+              </Card>
+            </div>
+          </article>
         </div>
       </section>
 
@@ -920,6 +945,33 @@ export function DesignSystemContent() {
                 fired twice.
               </p>
             </Prose>
+          </article>
+
+          <article>
+            <h4 className="font-mono text-base text-ink">Copy button</h4>
+            <p className="mt-1 font-mono text-xs text-ink-faint">
+              <span className="text-ink-muted">CopyButton</span> ·
+              design-system/actions/copy-button.tsx
+            </p>
+            <Prose>
+              <p className="mt-3">
+                A <Code>default</Code> button wired to write <Code>content</Code> to the system
+                clipboard. The write is invisible, so on success it swaps its label to{" "}
+                <Code>copiedLabel</Code> for a beat before reverting — the feedback the user needs
+                to know it took. If the clipboard rejects (an insecure context, denied permission)
+                it surfaces the reason inline beside the button rather than failing silently. Pass{" "}
+                <Code>label</Code> to name what's copied so the control stays content-agnostic —
+                "copy markdown", "copy link", "copy SHA".
+              </p>
+            </Prose>
+            <div className="mt-5">
+              <Card>
+                <div className="flex flex-wrap items-baseline gap-4">
+                  <CopyButton content="the quick brown fox" />
+                  <CopyButton content="# The morning briefing" label="copy markdown" />
+                </div>
+              </Card>
+            </div>
           </article>
 
           <article>
