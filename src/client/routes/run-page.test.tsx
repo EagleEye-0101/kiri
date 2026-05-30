@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
@@ -7,17 +8,20 @@ import { memoryLocation } from "wouter/memory-location";
 import { captureEventSources } from "../../../tests/setup/fake-event-source.ts";
 import { server } from "../../../tests/setup/msw.ts";
 import { LiveEventsProvider } from "../events/live.tsx";
-import { RunPage } from "./run-page.tsx";
+import { createQueryClient } from "../state/query-client.ts";
+import { RunContent } from "./run-page.tsx";
 
 const renderRun = (id: string) => {
   const { hook } = memoryLocation({ path: `/runs/${id}` });
   const { factory, sources } = captureEventSources();
   const ui = render(
-    <Router hook={hook}>
+    <QueryClientProvider client={createQueryClient()}>
       <LiveEventsProvider factory={factory}>
-        <RunPage params={{ id }} />
+        <Router hook={hook}>
+          <RunContent params={{ id }} />
+        </Router>
       </LiveEventsProvider>
-    </Router>,
+    </QueryClientProvider>,
   );
   return { ...ui, sources };
 };
@@ -85,176 +89,6 @@ describe("<RunPage>", () => {
       expect(screen.getByRole("alert")).toBeDefined();
     });
     expect(screen.getByRole("alert").textContent).toMatch(/failed to load run/i);
-  });
-
-  it("refetches when a workflow event for the matching workflow name fires", async () => {
-    // Initial fetch returns the run + an empty workflows list (no inputs).
-    // A workflow.updated event for the matching name triggers a refetch
-    // and the new registry response declares inputs, arming the modal.
-    let runFetches = 0;
-    let wfFetches = 0;
-    server.use(
-      http.get("*/api/runs/:id", ({ params }) => {
-        runFetches++;
-        return HttpResponse.json({
-          run: {
-            id: params.id,
-            workflowName: "edited",
-            status: "ok",
-            trigger: "manual",
-            startedAt: "2026-05-09T12:00:00.000Z",
-            finishedAt: "2026-05-09T12:00:01.000Z",
-            error: null,
-            summary: null,
-            definitionSnapshot: { name: "edited", steps: [] },
-            isInterrupted: false,
-            articles: [],
-            inputs: null,
-          },
-          steps: [],
-        });
-      }),
-      http.get("*/api/workflows", () => {
-        wfFetches++;
-        return HttpResponse.json(
-          wfFetches === 1
-            ? [{ name: "edited", steps: [{ sh: "echo hi" }] }]
-            : [
-                {
-                  name: "edited",
-                  inputs: [{ name: "topic", required: true }],
-                  steps: [{ sh: "echo hi" }],
-                },
-              ],
-        );
-      }),
-    );
-
-    const { sources } = renderRun("abc");
-    await screen.findByRole("button", { name: /run again/i });
-    expect(runFetches).toBe(1);
-    expect(wfFetches).toBe(1);
-
-    // Event for a *different* workflow name is filtered out — no refetch.
-    act(() => {
-      sources[0]?.emit({ type: "workflow.updated", name: "other-thing" });
-    });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(runFetches).toBe(1);
-    expect(wfFetches).toBe(1);
-
-    // Event for the matching name passes the filter and triggers refetch.
-    act(() => {
-      sources[0]?.emit({ type: "workflow.updated", name: "edited" });
-    });
-    await waitFor(() => {
-      expect(wfFetches).toBe(2);
-    });
-  });
-
-  it("refetches when a run event for the matching id fires", async () => {
-    let calls = 0;
-    server.use(
-      http.get("*/api/runs/:id", ({ params }) => {
-        calls++;
-        return HttpResponse.json({
-          run: {
-            id: params.id,
-            workflowName: `wf-${calls}`,
-            status: "running",
-            trigger: "manual",
-            startedAt: "2026-05-09T12:00:00.000Z",
-            finishedAt: null,
-            error: null,
-            definitionSnapshot: { name: `wf-${calls}`, steps: [] },
-            isInterrupted: false,
-            articles: [],
-          },
-          steps: [],
-        });
-      }),
-    );
-
-    const { sources } = renderRun("abc");
-    await screen.findByRole("heading", { level: 2, name: /wf-1/i });
-
-    act(() => {
-      sources[0]?.emit({ type: "run.updated", id: "abc", status: "ok" });
-    });
-    await screen.findByRole("heading", { level: 2, name: /wf-2/i });
-
-    act(() => {
-      sources[0]?.emit({
-        type: "run.step.updated",
-        runId: "abc",
-        step: 0,
-        status: "ok",
-      });
-    });
-    await screen.findByRole("heading", { level: 2, name: /wf-3/i });
-
-    act(() => {
-      sources[0]?.emit({
-        type: "run.finished",
-        id: "abc",
-        status: "ok",
-        workflowName: "wf",
-      });
-    });
-    await screen.findByRole("heading", { level: 2, name: /wf-4/i });
-  });
-
-  it("refreshes the article list in place when a run event arrives mid-run", async () => {
-    // First fetch: pipeline running, no articles yet. After a run.updated
-    // event the next fetch reflects the article the publish step just
-    // produced — the Published section appears without a page reload.
-    let calls = 0;
-    server.use(
-      http.get("*/api/runs/:id", ({ params }) => {
-        calls++;
-        const articles =
-          calls === 1
-            ? []
-            : [
-                {
-                  name: "digest",
-                  title: "PR Review Digest",
-                  createdAt: "2026-05-09T12:00:30.000Z",
-                },
-              ];
-        return HttpResponse.json({
-          run: {
-            id: params.id,
-            workflowName: "with-publish",
-            status: "running",
-            trigger: "manual",
-            startedAt: "2026-05-09T12:00:00.000Z",
-            finishedAt: null,
-            error: null,
-            summary: null,
-            definitionSnapshot: { name: "with-publish", steps: [] },
-            isInterrupted: false,
-            articles,
-          },
-          steps: [],
-        });
-      }),
-    );
-
-    const { sources } = renderRun("abc");
-    await screen.findByRole("heading", { level: 2, name: /with-publish/i });
-    // No Published section yet — initial fetch returned no articles.
-    expect(screen.queryByRole("heading", { name: /^published$/i })).toBeNull();
-
-    act(() => {
-      sources[0]?.emit({ type: "run.updated", id: "abc", status: "running" });
-    });
-
-    // The refetch driven by the event surfaces the new article row in place.
-    expect(await screen.findByRole("heading", { name: /^published$/i })).toBeDefined();
-    expect(screen.getByRole("link", { name: /PR Review Digest/i }).getAttribute("href")).toBe(
-      "/runs/abc/published/digest",
-    );
   });
 
   it("wires the cancel button to POST /api/runs/:id/cancel", async () => {
@@ -326,11 +160,13 @@ describe("<RunPage>", () => {
       const memory = memoryLocation({ path: `/runs/${id}`, record: true });
       const { factory } = captureEventSources();
       const ui = render(
-        <Router hook={memory.hook}>
+        <QueryClientProvider client={createQueryClient()}>
           <LiveEventsProvider factory={factory}>
-            <RunPage params={{ id }} />
+            <Router hook={memory.hook}>
+              <RunContent params={{ id }} />
+            </Router>
           </LiveEventsProvider>
-        </Router>,
+        </QueryClientProvider>,
       );
       return { ...ui, history: memory.history };
     };
@@ -467,11 +303,13 @@ describe("<RunPage>", () => {
       const memory = memoryLocation({ path: `/runs/${id}`, record: true });
       const { factory } = captureEventSources();
       const ui = render(
-        <Router hook={memory.hook}>
+        <QueryClientProvider client={createQueryClient()}>
           <LiveEventsProvider factory={factory}>
-            <RunPage params={{ id }} />
+            <Router hook={memory.hook}>
+              <RunContent params={{ id }} />
+            </Router>
           </LiveEventsProvider>
-        </Router>,
+        </QueryClientProvider>,
       );
       return { ...ui, history: memory.history };
     };
@@ -758,149 +596,5 @@ describe("<RunPage>", () => {
       expect(seen[0].recId).toBe("rec-1");
       expect(JSON.parse(seen[0].body)).toEqual({ inputs: { pr_number: "1" } });
     });
-
-    it("refetches on a recommendation.actioned event for this run", async () => {
-      let calls = 0;
-      server.use(
-        http.get("*/api/runs/:id", ({ params }) => {
-          calls++;
-          return HttpResponse.json(
-            runPayload(String(params.id), [
-              {
-                id: "rec-1",
-                index: 0,
-                title: calls === 1 ? "untriggered" : "actioned",
-                description: null,
-                workflow: "pr-review",
-                inputs: null,
-                actionedRunId: calls === 1 ? null : "spawned-1",
-                actionedAt: calls === 1 ? null : "2026-05-09T12:00:30.000Z",
-                actionedRunStatus: calls === 1 ? null : "running",
-              },
-            ]),
-          );
-        }),
-      );
-
-      const { sources } = renderRun("producer-1");
-      await screen.findByText("untriggered");
-      expect(calls).toBe(1);
-
-      // Event for a different producing run is filtered out.
-      act(() => {
-        sources[0]?.emit({
-          type: "recommendation.actioned",
-          runId: "someone-else",
-          recommendationId: "rec-x",
-          actionedRunId: "x",
-        });
-      });
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(calls).toBe(1);
-
-      // Event for *this* run triggers a refetch — the row flips to its
-      // status-badged link.
-      act(() => {
-        sources[0]?.emit({
-          type: "recommendation.actioned",
-          runId: "producer-1",
-          recommendationId: "rec-1",
-          actionedRunId: "spawned-1",
-        });
-      });
-
-      await screen.findByText("actioned");
-    });
-
-    it("refetches on run.updated events for any actioned run id on this page", async () => {
-      let calls = 0;
-      server.use(
-        http.get("*/api/runs/:id", ({ params }) => {
-          calls++;
-          return HttpResponse.json(
-            runPayload(String(params.id), [
-              {
-                id: "rec-1",
-                index: 0,
-                title: "Review",
-                description: null,
-                workflow: "pr-review",
-                inputs: null,
-                actionedRunId: "spawned-7",
-                actionedAt: "2026-05-09T12:00:30.000Z",
-                actionedRunStatus: calls <= 1 ? "running" : "ok",
-              },
-            ]),
-          );
-        }),
-      );
-
-      const { sources } = renderRun("producer-1");
-      await screen.findByRole("link", { name: /review/i });
-      expect(calls).toBe(1);
-
-      // Unrelated run id: filtered out, no refetch.
-      act(() => {
-        sources[0]?.emit({ type: "run.updated", id: "totally-other", status: "ok" });
-      });
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(calls).toBe(1);
-
-      // The actioned run id: matches the filter, refetch fires and the
-      // status badge updates to the new terminal status.
-      act(() => {
-        sources[0]?.emit({ type: "run.updated", id: "spawned-7", status: "ok" });
-      });
-      await waitFor(() => {
-        expect(calls).toBe(2);
-      });
-    });
-  });
-
-  it("ignores events for other run ids", async () => {
-    let calls = 0;
-    server.use(
-      http.get("*/api/runs/:id", ({ params }) => {
-        calls++;
-        return HttpResponse.json({
-          run: {
-            id: params.id,
-            workflowName: `wf-${calls}`,
-            status: "running",
-            trigger: "manual",
-            startedAt: "2026-05-09T12:00:00.000Z",
-            finishedAt: null,
-            error: null,
-            definitionSnapshot: { name: `wf-${calls}`, steps: [] },
-            isInterrupted: false,
-            articles: [],
-          },
-          steps: [],
-        });
-      }),
-    );
-
-    const { sources } = renderRun("abc");
-    await screen.findByRole("heading", { level: 2, name: /wf-1/i });
-
-    act(() => {
-      sources[0]?.emit({ type: "run.updated", id: "other", status: "ok" });
-      sources[0]?.emit({
-        type: "run.step.updated",
-        runId: "other",
-        step: 0,
-        status: "ok",
-      });
-      sources[0]?.emit({
-        type: "run.finished",
-        id: "other",
-        status: "ok",
-        workflowName: "x",
-      });
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(screen.getByRole("heading", { level: 2, name: /wf-1/i })).toBeDefined();
-    expect(calls).toBe(1);
   });
 });

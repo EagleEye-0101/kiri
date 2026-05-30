@@ -26,7 +26,7 @@ const renderAt = (path: string) => {
 describe("<App>", () => {
   it("renders the kiri wordmark from the page shell", async () => {
     renderAt("/");
-    expect(screen.getByRole("link", { name: /^kiri$/i })).toBeDefined();
+    expect(await screen.findByRole("heading", { name: /^kiri$/i })).toBeDefined();
     await flushAsync();
   });
 
@@ -42,6 +42,16 @@ describe("<App>", () => {
   it("routes /workflows/:name to the workflow page", async () => {
     renderAt("/workflows/example");
     expect(screen.getByText(/loading workflow/i)).toBeDefined();
+    expect(screen.queryByText(/page not found/i)).toBeNull();
+    await flushAsync();
+  });
+
+  it("routes /runs/:id to the run page", async () => {
+    // Stall the run fetch so the page stays in its loading state for the
+    // assertion; the shell around it still renders.
+    server.use(http.get("*/api/runs/:id", () => new Promise<Response>(() => {})));
+    renderAt("/runs/abc");
+    expect(screen.getByText(/loading run/i)).toBeDefined();
     expect(screen.queryByText(/page not found/i)).toBeNull();
     await flushAsync();
   });

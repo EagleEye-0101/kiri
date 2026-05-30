@@ -1,7 +1,7 @@
-import type { WorkflowSummary } from "../api.ts";
-import { Code } from "../design-system/content/code.tsx";
-import { EmptyState } from "../design-system/content/empty-state.tsx";
-import { type NavGroup, type NavItem, NavList } from "../design-system/navigation/nav-list.tsx";
+import type { WorkflowSummary } from "../../api.ts";
+import { Code } from "../../design-system/content/code.tsx";
+import { EmptyState } from "../../design-system/content/empty-state.tsx";
+import { type NavGroup, type NavItem, NavList } from "../../design-system/navigation/nav-list.tsx";
 
 const toItem = (workflow: WorkflowSummary, activeName: string | null): NavItem => ({
   label: workflow.name,
@@ -40,11 +40,11 @@ const partition = (
 };
 
 /**
- * Workflows nav for the page shell's left rail. Workflows that declare a
- * `group` are bucketed under that label; ungrouped workflows list flat above
- * the groups, and the active row picks up the accent strip and ink colour.
- * When the registry is empty, a single italic sentence points at `kiri init`
- * and `workflows/` so a fresh clone never shows blank navigation.
+ * Workflows nav for the site rail. Workflows that declare a `group` are
+ * bucketed under that label; ungrouped workflows list flat above the groups,
+ * and the active row picks up the accent strip and ink colour. When the
+ * registry is empty, a single italic sentence points at `kiri init` and
+ * `workflows/` so a fresh clone never shows blank navigation.
  */
 export function WorkflowsNav({
   workflows,

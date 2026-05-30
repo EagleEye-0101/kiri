@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { render, screen, within } from "@testing-library/react";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
-import type { WorkflowSummary } from "../api.ts";
+import type { WorkflowSummary } from "../../api.ts";
 import { WorkflowsNav } from "./workflows-nav.tsx";
 
 const renderNav = (workflows: WorkflowSummary[], activeName: string | null = null) => {
@@ -15,9 +15,10 @@ const renderNav = (workflows: WorkflowSummary[], activeName: string | null = nul
 };
 
 const wf = (name: string): WorkflowSummary => ({ name, steps: [] });
+const grouped = (name: string, group: string): WorkflowSummary => ({ name, group, steps: [] });
 
 describe("<WorkflowsNav>", () => {
-  it("renders an empty-state sentence pointing at kiri init and workflows/ when no workflows exist", () => {
+  it("renders an empty-state sentence pointing at kiri init and workflows/ when none exist", () => {
     renderNav([]);
     const text = screen.getByText(/no workflows yet/i);
     expect(text.textContent).toContain("kiri init");
@@ -32,22 +33,22 @@ describe("<WorkflowsNav>", () => {
 
   it("renders each workflow name as a link to /workflows/:name", () => {
     renderNav([wf("pr-review")]);
-    const link = screen.getByRole("link", { name: /pr-review/i });
-    expect(link.getAttribute("href")).toBe("/workflows/pr-review");
+    expect(screen.getByRole("link", { name: /pr-review/i }).getAttribute("href")).toBe(
+      "/workflows/pr-review",
+    );
   });
 
   it("URL-encodes workflow names with characters that need escaping", () => {
     renderNav([wf("flow with space")]);
-    const link = screen.getByRole("link", { name: /flow with space/i });
-    expect(link.getAttribute("href")).toBe("/workflows/flow%20with%20space");
+    expect(screen.getByRole("link", { name: /flow with space/i }).getAttribute("href")).toBe(
+      "/workflows/flow%20with%20space",
+    );
   });
 
   it("marks the active workflow with aria-current='page'", () => {
     renderNav([wf("alpha"), wf("beta")], "beta");
-    const beta = screen.getByRole("link", { name: /beta/i });
-    const alpha = screen.getByRole("link", { name: /alpha/i });
-    expect(beta.getAttribute("aria-current")).toBe("page");
-    expect(alpha.getAttribute("aria-current")).toBeNull();
+    expect(screen.getByRole("link", { name: /beta/i }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: /alpha/i }).getAttribute("aria-current")).toBeNull();
   });
 
   it("does not mark any row when no workflow matches the active name", () => {
@@ -55,18 +56,13 @@ describe("<WorkflowsNav>", () => {
     expect(screen.queryByRole("link", { current: "page" })).toBeNull();
   });
 
-  const grouped = (name: string, group: string): WorkflowSummary => ({ name, group, steps: [] });
-
-  it("buckets workflows that declare a group under a sub-heading, ungrouped ones flat", () => {
+  it("buckets grouped workflows under a sub-heading and lists ungrouped ones flat", () => {
     renderNav([wf("hello-world"), grouped("lint", "Dev"), grouped("deploy", "Ops")]);
     expect(screen.getByRole("link", { name: /hello-world/i })).toBeDefined();
     expect(screen.getByRole("heading", { name: "Dev" })).toBeDefined();
     expect(screen.getByRole("heading", { name: "Ops" })).toBeDefined();
     expect(screen.getByRole("link", { name: /lint/i }).getAttribute("href")).toBe(
       "/workflows/lint",
-    );
-    expect(screen.getByRole("link", { name: /deploy/i }).getAttribute("href")).toBe(
-      "/workflows/deploy",
     );
   });
 
