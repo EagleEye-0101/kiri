@@ -1,9 +1,14 @@
-import { useLocation } from "wouter";
-import { ApiError, actionRecommendation, cancelRun, deleteRun, rerunRun } from "../api.ts";
-import { RunDetailView } from "../components/run-detail.tsx";
+import { ApiError } from "../api.ts";
 import { LoadingState } from "../design-system/content/loading-state.tsx";
+import { Markdown } from "../design-system/content/markdown.tsx";
 import { Breadcrumb } from "../design-system/navigation/breadcrumb.tsx";
 import { PageShell } from "../features/page-shell/page-shell.tsx";
+import { RunActions } from "../features/run-detail/run-actions.tsx";
+import { RunAside } from "../features/run-detail/run-aside.tsx";
+import { RunFailure } from "../features/run-detail/run-failure.tsx";
+import { RunHeader } from "../features/run-detail/run-header.tsx";
+import { RunPhases } from "../features/run-detail/run-phases.tsx";
+import { RunRecommendations } from "../features/run-detail/run-recommendations.tsx";
 import { SiteNav } from "../features/site-nav/site-nav.tsx";
 import { useRun } from "../state/runs.ts";
 import { useWorkflows } from "../state/workflows.ts";
@@ -13,27 +18,26 @@ import { useWorkflows } from "../state/workflows.ts";
  */
 export function RunPage({ params }: { params: { id: string } }) {
   return (
-    <PageShell left={<SiteNav />}>
+    <PageShell left={<SiteNav />} right={<RunAside id={params.id} />}>
       <RunContent params={params} />
     </PageShell>
   );
 }
 
 /**
- * Run detail content. Reads the run from the shared query — kept current
- * by the app's run live-sync, including the spawned-run status the server
- * reflects onto this run's recommendations — and renders one of: loading,
- * not-found (404), generic error, or the editorial run detail view.
+ * Run detail content. Reads the run from the shared query — kept current by
+ * the app's run live-sync — and renders one of: loading, not-found (404),
+ * generic error, or the run detail (header, then the workflow's summary once
+ * it has produced one).
  *
- * The re-run path reads the run's *current* workflow definition from the
- * workflows query to decide whether to pre-fill the invoke modal; while
- * that loads (or if it fails) the list is empty and the run renders
- * without the modal-aware re-run.
+ * `now` is injectable so tests render deterministic times and the header's
+ * live timer doesn't tick; production omits it.
  */
-export function RunContent({ params }: { params: { id: string } }) {
+export function RunContent({ params, now }: { params: { id: string }; now?: Date }) {
   const run = useRun(params.id);
+  // The re-run path reads the workflow's *current* declared inputs from the
+  // registry to decide whether to open the pre-filled invoke modal.
   const { data: workflows } = useWorkflows();
-  const [, navigate] = useLocation();
 
   if (run.isPending) {
     return <LoadingState>Loading run…</LoadingState>;
@@ -57,54 +61,38 @@ export function RunContent({ params }: { params: { id: string } }) {
     );
   }
 
-  const detail = run.data;
-
-  const handleDelete = async () => {
-    if (!window.confirm("Delete this run? This cannot be undone.")) return;
-    try {
-      await deleteRun(params.id);
-    } catch (err) {
-      // Another tab (or stale data) already removed it — the user's intent
-      // is satisfied either way; fall through to navigate home.
-      if (!(err instanceof ApiError) || err.status !== 404) throw err;
-    }
-    navigate("/");
-  };
-
-  const handleRerun = async (inputs?: Record<string, string>) => {
-    // The modal is the confirmation gesture when inputs are involved — the
-    // user has filled the form and pressed Run. The bare path keeps the
-    // explicit window.confirm so an accidental click doesn't wipe a prior
-    // attempt without warning.
-    if (inputs === undefined) {
-      if (!window.confirm("Run again? The previous attempt's steps and traces will be cleared."))
-        return;
-    }
-    await rerunRun(params.id, inputs);
-  };
-
-  const handleActionRecommendation = async (
-    recommendationId: string,
-    inputs?: Record<string, string>,
-  ) => {
-    // The server emits recommendation.actioned on success, which
-    // invalidates this run's query and refreshes the rec row — no manual
-    // refetch needed.
-    await actionRecommendation(params.id, recommendationId, inputs);
-  };
-
-  const workflowList = workflows ?? [];
-  const workflowInputs = workflowList.find((w) => w.name === detail.run.workflowName)?.inputs;
+  const { run: detail, steps } = run.data;
+  const workflowInputs = workflows?.find((w) => w.name === detail.workflowName)?.inputs;
 
   return (
-    <RunDetailView
-      detail={detail}
-      onCancel={() => cancelRun(params.id)}
-      onDelete={handleDelete}
-      onRerun={handleRerun}
-      workflowInputs={workflowInputs}
-      workflows={workflowList}
-      onActionRecommendation={handleActionRecommendation}
-    />
+    <article>
+      <Breadcrumb
+        items={[
+          { label: "Activity", href: "/" },
+          {
+            label: detail.workflowName,
+            href: `/workflows/${encodeURIComponent(detail.workflowName)}`,
+          },
+        ]}
+        current={detail.id.slice(0, 8)}
+      />
+      <RunHeader
+        run={detail}
+        now={now}
+        actions={<RunActions run={detail} workflowInputs={workflowInputs} />}
+      />
+      {detail.summary ? (
+        <div className="mt-8">
+          <Markdown content={detail.summary} />
+        </div>
+      ) : null}
+      {detail.error ? <RunFailure error={detail.error} /> : null}
+      <RunPhases run={detail} steps={steps} now={now} />
+      <RunRecommendations
+        runId={detail.id}
+        recommendations={detail.recommendations}
+        workflows={workflows ?? []}
+      />
+    </article>
   );
 }

@@ -69,8 +69,10 @@ test("opening a run detail page reveals stdout when the step is expanded", async
   const { runId } = await triggerRun(request, "golden");
 
   await page.goto(`/runs/${runId}`);
-  await expect(page.getByRole("heading", { level: 2, name: /golden/i })).toBeVisible();
-  await expect(page.getByRole("heading", { level: 3, name: /^activity$/i })).toBeVisible();
+  // The workflow name sits in the eyebrow above the run's short-id heading,
+  // and the pipeline renders under the "Steps" group label.
+  await expect(page.getByText("golden · Run")).toBeVisible();
+  await expect(page.getByText("Steps")).toBeVisible();
 
   const step = page.getByRole("button", { name: /sh:/i });
   await expect(step).toHaveAttribute("aria-expanded", "false");
@@ -109,7 +111,8 @@ test("triggering a workflow from the side nav lands on the run detail", async ({
 
   await page.getByRole("button", { name: /^run/i }).click();
   await expect(page).toHaveURL(/\/runs\/[a-f0-9-]+$/);
-  await expect(page.getByRole("heading", { level: 2, name: /golden/i })).toBeVisible();
+  // On the run page the workflow name is the eyebrow, not the heading.
+  await expect(page.getByText("golden · Run")).toBeVisible();
 });
 
 test("invoking a workflow with inputs opens a modal, collects values, and lands on the run", async ({
@@ -136,7 +139,7 @@ test("invoking a workflow with inputs opens a modal, collects values, and lands 
   await dialog.getByRole("button", { name: /^run/i }).click();
 
   await expect(page).toHaveURL(/\/runs\/[a-f0-9-]+$/);
-  await expect(page.getByRole("heading", { level: 2, name: /with-inputs/i })).toBeVisible();
+  await expect(page.getByText("with-inputs · Run")).toBeVisible();
 
   // The step echoes the resolved env, confirming the inputs flowed through
   // the API → snapshot → spawn env path. The disclosure has to be expanded
