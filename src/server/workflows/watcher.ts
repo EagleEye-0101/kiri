@@ -1,5 +1,6 @@
 import { type FSWatcher, statSync, watch } from "node:fs";
 import type { EventBus } from "../events/index.ts";
+import type { LlmRegistry } from "../llm/index.ts";
 import { type LoadResult, loadWorkflows } from "./loader.ts";
 import type { Registry } from "./registry.ts";
 
@@ -54,6 +55,7 @@ export function watchWorkflows(
   registry: Registry,
   initial: LoadResult,
   options: WatchOptions = {},
+  llmRegistry?: LlmRegistry,
 ): WorkflowWatcher {
   const debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
   const watchFn = options.watchFn ?? watch;
@@ -66,7 +68,7 @@ export function watchWorkflows(
     timer = null;
     let result: LoadResult;
     try {
-      result = await loadWorkflows(dir, cwd);
+      result = await loadWorkflows(dir, cwd, llmRegistry);
     } catch (cause) {
       // Directory disappeared between an fs.watch event and the debounced
       // rebuild — usually a teardown race. Log and bail; if it's transient

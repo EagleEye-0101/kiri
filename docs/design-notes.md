@@ -53,10 +53,11 @@ summarize:                 # optional one or two sentence feed summary
   use: claude-code-summarizer
 ```
 
-A step is one of two shapes:
+A step is exactly one of three shapes:
 
 - `{ use: <name>, name?, description?, env?: { ... } }` — references a **script bundle** at `scripts/<name>/run.sh`. The bundle is a folder containing at minimum `run.sh` plus any sidecar files it needs (prompt files, generated settings, README documenting the bundle's env-var contract).
 - `{ sh: <string>, name?, description?, env?: { ... } }` — inline shell script, run via `sh -c`. Sugar for one-shots that don't deserve their own bundle. Multi-line via YAML's `|` block scalar.
+- `{ llm: { model, prompt? | prompt_file? }, name?, description?, env?: { ... } }` — first-party LLM completion via a provider declared in `llm-providers.yaml`. `model` is required in `provider:model` form. `prompt` and `prompt_file` are mutually exclusive; exactly one is required on main steps and publish entries. On `summarize:` both may be omitted — the runner applies a baked-in default summariser prompt.
 
 The optional `name` is a short label rendered as the step's title in the Schema tab and the run timeline; it falls back to the bundle reference or the script's first non-empty line. `description` is longer detail shown when a step's row is expanded.
 

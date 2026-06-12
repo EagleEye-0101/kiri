@@ -1,5 +1,13 @@
 import { describe, expect, it } from "bun:test";
-import { isShPublish, isShStep, isUsePublish, isUseStep, workflowSchema } from "./schema.ts";
+import {
+  isLlmPublish,
+  isLlmStep,
+  isShPublish,
+  isShStep,
+  isUsePublish,
+  isUseStep,
+  workflowSchema,
+} from "./schema.ts";
 
 describe("workflowSchema", () => {
   it("parses a minimal valid workflow with a use: step", () => {
@@ -704,6 +712,69 @@ describe("workflowSchema", () => {
       publish: [{ slug: "digest", use: "writer", env: { LABEL: { input: "pr_number" } } }],
     });
     expect(result.publish?.[0].env).toEqual({ LABEL: { input: "pr_number" } });
+  });
+
+  it("parses an llm step in steps, publish, and summarize", () => {
+    const result = workflowSchema.parse({
+      name: "llm-flow",
+      steps: [{ llm: { model: "anthropic:claude-haiku-4-5", prompt: "hi" } }],
+      publish: [{ slug: "out", llm: { model: "openai:gpt-4o-mini", prompt_file: "prompts/out.tpl" } }],
+      summarize: { llm: { model: "anthropic:claude-haiku-4-5" } },
+    });
+    expect(isLlmStep(result.steps[0])).toBe(true);
+    expect(result.publish?.[0]).toMatchObject({
+      slug: "out",
+      llm: { model: "openai:gpt-4o-mini", prompt_file: "prompts/out.tpl" },
+    });
+    expect(isLlmStep(result.summarize!)).toBe(true);
+  });
+
+  it("rejects a step with both use and llm", () => {
+    expect(() =>
+      workflowSchema.parse({
+        name: "bad",
+        steps: [{ use: "x", llm: { model: "anthropic:m", prompt: "p" } }],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects llm steps with prompt and prompt_file together", () => {
+    const result = workflowSchema.safeParse({
+      name: "bad",
+      steps: [{ llm: { model: "anthropic:m", prompt: "a", prompt_file: "p.tpl" } }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects llm steps outside summarize without a prompt source", () => {
+    const result = workflowSchema.safeParse({
+      name: "bad",
+      steps: [{ llm: { model: "anthropic:m" } }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("allows summarize llm steps with no prompt (default applied at run time)", () => {
+    const result = workflowSchema.parse({
+      name: "sum",
+      steps: [{ use: "x" }],
+      summarize: { llm: { model: "anthropic:claude-haiku-4-5" } },
+    });
+    expect(result.summarize).toEqual({ llm: { model: "anthropic:claude-haiku-4-5" } });
+  });
+});
+
+describe("isLlmStep / isLlmPublish", () => {
+  it("narrows an llm step", () => {
+    const step = { llm: { model: "anthropic:m", prompt: "p" } } as const;
+    expect(isLlmStep(step)).toBe(true);
+    expect(isUseStep(step)).toBe(false);
+  });
+
+  it("narrows an llm publish entry", () => {
+    const entry = { slug: "out", llm: { model: "openai:m", prompt: "p" } } as const;
+    expect(isLlmPublish(entry)).toBe(true);
+    expect(isUsePublish(entry)).toBe(false);
   });
 });
 

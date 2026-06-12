@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createLlmRegistry } from "../llm/index.ts";
 import { loadWorkflows } from "./loader.ts";
 
 const yamlSource = (name: string, useName = name) =>
@@ -396,5 +397,45 @@ steps:
   it("throws when the directory does not exist", () => {
     const missing = join(dir, "does-not-exist");
     expect(loadWorkflows(missing, cwd)).rejects.toThrow();
+  });
+
+  it("records a failure when an llm step references an unknown provider prefix", async () => {
+    const llmRegistry = createLlmRegistry();
+    llmRegistry.replace(
+      new Map([["anthropic", { name: "anthropic", type: "anthropic", apiKeyEnv: "K" }]]),
+    );
+    writeFileSync(
+      join(dir, "llm.yaml"),
+      `name: llm-wf
+steps:
+  - llm:
+      model: missing:claude-haiku-4-5
+      prompt: hi
+`,
+    );
+
+    const result = await loadWorkflows(dir, cwd, llmRegistry);
+    expect(result.workflows.size).toBe(0);
+    expect(result.failures[0].reason).toContain('unknown LLM provider prefix "missing"');
+  });
+
+  it("records a failure when an llm prompt_file is missing on disk", async () => {
+    const llmRegistry = createLlmRegistry();
+    llmRegistry.replace(
+      new Map([["anthropic", { name: "anthropic", type: "anthropic", apiKeyEnv: "K" }]]),
+    );
+    writeFileSync(
+      join(dir, "llm.yaml"),
+      `name: llm-wf
+steps:
+  - llm:
+      model: anthropic:claude-haiku-4-5
+      prompt_file: prompts/missing.tpl
+`,
+    );
+
+    const result = await loadWorkflows(dir, cwd, llmRegistry);
+    expect(result.workflows.size).toBe(0);
+    expect(result.failures[0].reason).toContain("prompt_file not found");
   });
 });

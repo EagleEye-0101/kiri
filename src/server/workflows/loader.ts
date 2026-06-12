@@ -1,6 +1,15 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { type WorkflowDefinition, isUsePublish, isUseStep, workflowSchema } from "./schema.ts";
+import type { LlmRegistry } from "../llm/index.ts";
+import {
+  type WorkflowDefinition,
+  isLlmPublish,
+  isLlmStep,
+  isUsePublish,
+  isUseStep,
+  llmProviderPrefix,
+  workflowSchema,
+} from "./schema.ts";
 
 /**
  * A workflow file that failed to load — either a YAML parse error, a
@@ -46,6 +55,40 @@ const validateBundles = (def: WorkflowDefinition, cwd: string): string[] => {
   return missing;
 };
 
+const validateLlmRefs = (
+  def: WorkflowDefinition,
+  cwd: string,
+  llmRegistry: LlmRegistry,
+): string[] => {
+  const errors: string[] = [];
+  const checkConfig = (llm: { model: string; prompt_file?: string }, label: string): void => {
+    const prefix = llmProviderPrefix(llm.model);
+    if (!prefix) {
+      errors.push(`${label}: model "${llm.model}" must be in provider:model form`);
+      return;
+    }
+    if (!llmRegistry.getProvider(prefix)) {
+      errors.push(`${label}: unknown LLM provider prefix "${prefix}"`);
+    }
+    if (llm.prompt_file && !existsSync(resolve(cwd, llm.prompt_file))) {
+      errors.push(`${label}: prompt_file not found: ${llm.prompt_file}`);
+    }
+  };
+
+  def.steps.forEach((step, i) => {
+    if (!isLlmStep(step)) return;
+    checkConfig(step.llm, `steps[${i}]`);
+  });
+  if (def.summarize && isLlmStep(def.summarize)) {
+    checkConfig(def.summarize.llm, "summarize");
+  }
+  def.publish?.forEach((entry, i) => {
+    if (!isLlmPublish(entry)) return;
+    checkConfig(entry.llm, `publish[${i}]`);
+  });
+  return errors;
+};
+
 /**
  * Scan `dir` for `*.yaml`/`*.yml` files (top-level only — nested files are
  * out of scope by design), parse each as YAML, validate against the
@@ -56,7 +99,11 @@ const validateBundles = (def: WorkflowDefinition, cwd: string): string[] => {
  * missing bundles) populate `result.failures` and the scan continues;
  * only directory-level errors (e.g. `dir` doesn't exist) throw.
  */
-export async function loadWorkflows(dir: string, cwd: string): Promise<LoadResult> {
+export async function loadWorkflows(
+  dir: string,
+  cwd: string,
+  llmRegistry?: LlmRegistry,
+): Promise<LoadResult> {
   const files = readdirSync(dir)
     .filter(isYamlFile)
     .map((name) => resolve(dir, name))
@@ -99,6 +146,14 @@ export async function loadWorkflows(dir: string, cwd: string): Promise<LoadResul
         reason: `missing ${noun} ${list}: expected scripts/<name>/run.sh under ${cwd}`,
       });
       continue;
+    }
+
+    if (llmRegistry) {
+      const llmErrors = validateLlmRefs(wf, cwd, llmRegistry);
+      if (llmErrors.length > 0) {
+        failures.push({ path: file, reason: llmErrors.join("; ") });
+        continue;
+      }
     }
 
     const existing = sources.get(wf.name);

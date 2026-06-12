@@ -84,13 +84,13 @@ try {
 }
 
 const workflowsDir = join(cwd, "workflows");
-const initial = await loadWorkflows(workflowsDir, cwd);
+const initial = await loadWorkflows(workflowsDir, cwd, llmRegistry);
 registry.replace(initial.workflows);
 for (const failure of initial.failures) {
   console.error(`workflows: failed to load ${failure.path}: ${failure.reason}`);
 }
 
-const watcher = watchWorkflows(workflowsDir, cwd, registry, initial, { bus });
+const watcher = watchWorkflows(workflowsDir, cwd, registry, initial, { bus }, llmRegistry);
 
 const app = createApp({ db, registry, llmRegistry, cwd, bus, cancelRegistry, version: VERSION });
 const server = startServer({ app, port: 4242 });

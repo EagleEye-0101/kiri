@@ -1,4 +1,7 @@
 export {
+  type LlmConfig,
+  type LlmPublish,
+  type LlmStep,
   type PublishEntry,
   type ShPublish,
   type ShStep,
@@ -6,10 +9,13 @@ export {
   type UseStep,
   type WorkflowDefinition,
   type WorkflowStep,
+  isLlmPublish,
+  isLlmStep,
   isShPublish,
   isShStep,
   isUsePublish,
   isUseStep,
+  llmProviderPrefix,
   workflowSchema,
 } from "./schema.ts";
 export {
