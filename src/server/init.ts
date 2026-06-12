@@ -27,12 +27,34 @@ steps:
     name: Greet                                             # optional, short label shown as the step title in the UI
     env:
       GREETING: hello
-  - sh: |
-      echo "post-processing"
+- sh: |
+    echo "post-processing"
+  - llm:
+      model: anthropic:claude-haiku-4-5
+      prompt_file: prompts/my-prompt.tpl
 \`\`\`
 
 Workflows are linear pipelines — each step's output feeds the next. No
 branches, conditionals, or fan-out/fan-in.
+
+### First-party \`llm:\` steps
+
+Completion-shaped AI steps call providers declared in \`llm-providers.yaml\`
+at the repo root — no script bundle required. \`model\` is \`provider:model\`
+form; \`prompt\` and \`prompt_file\` are mutually exclusive on main steps and
+publish entries. On \`summarize:\`, both may be omitted for kiri's baked-in
+default summariser prompt.
+
+\`\`\`yaml
+- llm:
+    model: anthropic:claude-haiku-4-5
+    prompt: "Summarise {{KIRI_INPUT}} in one sentence."
+\`\`\`
+
+See \`llm-providers.yaml\` (create it at the workspace root; kiri publishes
+\`.kiri/llm-providers.schema.json\` for editor validation). API keys live in
+environment variables referenced from the YAML — never as literal strings in
+git.
 
 \`description\` and \`group\` are optional top-level metadata: \`description\`
 renders as the deck beneath the workflow's title; \`group\` buckets the
@@ -163,9 +185,9 @@ becomes a one-click launch.
 
 ## IDE / LSP integration
 
-Kiri publishes the workflow JSON Schema at \`.kiri/workflow.schema.json\` and
-refreshes it on every startup, so editor validation and autocomplete stays in
-sync after you upgrade kiri.
+Kiri publishes JSON Schemas at \`.kiri/workflow.schema.json\` and
+\`.kiri/llm-providers.schema.json\`, refreshing both on every startup, so
+editor validation stays in sync after you upgrade kiri.
 
 ### VS Code (Red Hat YAML extension)
 

@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=./.kiri/llm-providers.schema.json
+
+# Workspace LLM endpoints referenced by `llm:` workflow steps.
+# Copy or adapt this file to your repo root. API keys live in env vars
+# (Bun loads `.env` from the workspace root) — never in git-tracked YAML.
+
+providers:
+  anthropic: {}
+  local:
+    type: openai-compatible
+    base_url: http://127.0.0.1:1234/v1

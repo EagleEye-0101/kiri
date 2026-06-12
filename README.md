@@ -13,7 +13,7 @@ Kiri is a single local app for running your personal scripts and AI workflows. Y
 - **An activity feed, not a canvas.** Every run — script or AI — streams into one reverse-chronological feed with its status, duration, and a one-line AI summary. The feed *is* the UI; there's no node graph to wire up.
 - **Runs become launch pads.** A run can surface one-click follow-up workflows on its detail page — an aggregator that lists your open PRs turns each one into a pre-filled "review this PR" button. No global queue, no inbox: the proposals live on the run that produced them.
 - **Long-form output, rendered.** Workflows can publish markdown articles — briefings, code reviews, digests — with inline charts, surfaced in the feed and a "recently published" rail.
-- **Local-first and git-based.** Workflows are YAML in your own git repo; runs execute on your machine while the app is open — no daemons, no cloud, no multi-tenancy. AI steps spawn the Claude Code CLI, so they bill to your existing subscription.
+- **Local-first and git-based.** Workflows are YAML in your own git repo; runs execute on your machine while the app is open — no daemons, no cloud, no multi-tenancy. Completion-shaped AI steps can call Anthropic, OpenAI, or any OpenAI-compatible endpoint via first-party `llm:` steps; agentic workflows still spawn the Claude Code CLI through script bundles.
 
 ## Install
 
@@ -56,7 +56,7 @@ Then open **https://local.kiri.build** in your browser. The hosted shell at that
 
 `kiri init` scaffolds a minimal **Hello World** workflow — a single inline shell step that runs on first launch with no external tools or LLM provider installed. It declares one input (`name`); clicking **Run** opens a modal to collect it, then echoes a greeting to the feed.
 
-Richer worked examples — bundles that spawn the Claude Code CLI or a local LM Studio model, and a Daily Briefing workflow that composes a fetch step, a published markdown article, and a summary — live in [`examples/`](./examples/). Copy a bundle into your workspace's `scripts/` when you want it.
+Richer worked examples — bundles that spawn the Claude Code CLI or a local LM Studio model, plus Daily Briefing workflows (bundle-backed and first-party `llm:` variants) that compose a fetch step, a published markdown article, and a summary — live in [`examples/`](./examples/). Copy a bundle into your workspace's `scripts/` when you want agentic steps; copy `llm-providers.yaml` when you want first-party completions.
 
 ## Trust model
 

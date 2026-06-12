@@ -198,6 +198,31 @@ steps:
       TARGET: production</code></pre>
       <p>Kiri passes the <code>env:</code> map through verbatim; what each key means is up to the bundle, documented in its own <code>README.md</code>. The project's <code>examples/</code> directory ships ready-made bundles — including a Claude Code runner — to copy into <code>scripts/</code> and adapt.</p>
 
+      <h3>First-party LLM — <code>llm:</code></h3>
+      <p>For completion-shaped steps — publish a markdown article, summarise a run, one-shot text — declare providers in <code>llm-providers.yaml</code> at the workspace root, then reference <code>provider:model</code> ids directly. Prompts use <code>{{VAR}}</code> templating (same rules as the <code>claude-code</code> bundles). On <code>publish:</code> and <code>summarize:</code> llm steps, kiri inlines <code>{{KIRI_RUN_CONTEXT}}</code> from a truncated run-envelope JSON blob rather than setting <code>KIRI_RUN_CONTEXT_FILE</code>. Agentic workflows (tool use, multi-turn sessions) still belong on script bundles.</p>
+      <pre><code># llm-providers.yaml
+providers:
+  anthropic: {}
+  local:
+    type: openai-compatible
+    base_url: http://127.0.0.1:1234/v1
+
+# workflows/digest.yaml
+steps:
+  - sh: curl -fsSL https://example.com/feed.json
+  - llm:
+      model: anthropic:claude-haiku-4-5
+      prompt: "Summarise {{KIRI_INPUT}} in one sentence."
+publish:
+  - slug: digest
+    llm:
+      model: anthropic:claude-haiku-4-5
+      prompt_file: prompts/digest.tpl
+summarize:
+  llm:
+    model: anthropic:claude-haiku-4-5</code></pre>
+      <p>See <code>examples/daily-briefing-llm.yaml</code> for a worked fetch → publish → summarise pipeline. API keys are referenced via <code>{ env: NAME }</code> in <code>llm-providers.yaml</code> — never as literal strings in git.</p>
+
       <h3>Labelling a step — <code>name:</code> / <code>description:</code></h3>
       <p>Both optional, both work on either step shape. <code>name:</code> is a short label shown as the step's title in the Schema tab and the run timeline; without it a step falls back to its <code>use:</code> reference or the first line of its <code>sh:</code> script, so set it to keep multi-line steps readable. <code>description:</code> is longer detail revealed when the step's row is expanded.</p>
       <pre><code>steps:
@@ -281,16 +306,16 @@ steps:
       <p>Each input is <code>{ name, description?, required?, default? }</code>. <code>required: true</code> gates the modal's submit until the field is non-empty; <code>default</code> pre-fills it. Wire an input into any step / publish / summarise <code>env:</code> with <code>{ input: &lt;name&gt; }</code> — refs to undeclared inputs fail at load. The resolved input map is snapshotted onto the run, so the activity feed and run page both reflect what the run was invoked with.</p>
 
       <h3>Summaries — <code>summarize:</code></h3>
-      <p>An optional post-run step whose stdout becomes the run's one-or-two-sentence summary, shown on the feed row and at the top of the run page. It has the same <code>{ use | sh, env? }</code> shape as a step and runs after <code>steps:</code> and <code>publish:</code>. A failing summariser does not change the run's status.</p>
+      <p>An optional post-run step whose stdout becomes the run's one-or-two-sentence summary, shown on the feed row and at the top of the run page. It has the same <code>{ use | sh | llm, env? }</code> shape as a step and runs after <code>steps:</code> and <code>publish:</code>. A failing summariser does not change the run's status.</p>
       <pre><code>name: hello
 steps:
   - sh: echo "hello world"
 summarize:
   sh: echo "said hello to the world"</code></pre>
-      <p>A <code>summarize:</code> step receives empty stdin and the <code>KIRI_RUN_CONTEXT_FILE</code> environment variable (see the table above), so it can describe what the run did. For an AI-written summary, the <code>examples/</code> directory ships a <code>claude-code-summarizer</code> bundle — copy it into <code>scripts/</code> and reference it with <code>use:</code>.</p>
+      <p>A <code>summarize:</code> step receives empty stdin. Script steps (<code>use:</code> / <code>sh:</code>) get <code>KIRI_RUN_CONTEXT_FILE</code> (see the table above); <code>llm:</code> steps get <code>{{KIRI_RUN_CONTEXT}}</code> inlined in the prompt. For an AI-written summary via bundles, the <code>examples/</code> directory ships <code>claude-code-summarizer</code>; for first-party completions, <code>summarize: { llm: { model } }</code> with no prompt uses kiri's baked-in default.</p>
 
       <h3>Published articles — <code>publish:</code></h3>
-      <p>An optional array of long-form markdown articles produced by the run. Each entry has the same <code>{ use | sh, env? }</code> shape as a step, plus a <code>slug</code> (lowercase letters, digits, hyphens — unique within the workflow, used as the article's URL id) and an optional display <code>name</code>. Publish steps run serially after <code>steps:</code> and before <code>summarize:</code>; each step's stdout is captured as the article body. They receive empty stdin — to build an article from the run's data, read <code>KIRI_RUN_CONTEXT_FILE</code>:</p>
+      <p>An optional array of long-form markdown articles produced by the run. Each entry has the same <code>{ use | sh | llm, env? }</code> shape as a step, plus a <code>slug</code> (lowercase letters, digits, hyphens — unique within the workflow, used as the article's URL id) and an optional display <code>name</code>. Publish steps run serially after <code>steps:</code> and before <code>summarize:</code>; each step's stdout is captured as the article body. They receive empty stdin — script steps read <code>KIRI_RUN_CONTEXT_FILE</code>; <code>llm:</code> steps reference <code>{{KIRI_RUN_CONTEXT}}</code> in the prompt template:</p>
       <pre><code>name: status
 steps:
   - sh: echo "all systems go"

@@ -33,9 +33,10 @@ The canonical user URL is `https://local.kiri.build` (the Pages-hosted shell). F
 
 ## Dogfood
 
-`examples/` is a complete kiri workspace the project keeps as both a reference and a manual smoke test. It carries the four example bundles and one real workflow:
+`examples/` is a complete kiri workspace the project keeps as both a reference and a manual smoke test. It carries the four example bundles, `llm-providers.yaml`, and worked workflows:
 
 - **Daily Briefing** — `sh:` (curl + jq against the HackerNews and Dev.to APIs) → `claude-code` publish (formats a markdown briefing article) → summariser. Exercises the `claude-code` bundle, the publish path, and the summariser end to end.
+- **Daily Briefing (LLM)** — same fetch step → first-party `llm:` publish and zero-config `llm:` summarise. Exercises `llm-providers.yaml`, `{{KIRI_RUN_CONTEXT}}` inlining, and the baked-in summariser default. Requires `ANTHROPIC_API_KEY` (or edit providers to point at a local server).
 
 To smoke-test it, run the orchestrator with `examples/` as its workspace while Vite serves the UI:
 

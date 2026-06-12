@@ -9,23 +9,46 @@ being forced on every new repo.
 
 ```
 examples/
+  llm-providers.yaml          # workspace LLM endpoints for first-party llm: steps
   scripts/
     claude-code/              # spawn the Claude Code CLI with a rendered prompt
     claude-code-summarizer/   # summarise: step backed by Claude Code
     lm-studio/                # one-shot completion against an OpenAI-compatible local server
     lm-studio-summarizer/     # summarise: step backed by LM Studio
   workflows/
-    daily-briefing.yaml       # composes a sh: fetch, a publish: article, and a summary
+    daily-briefing.yaml       # composes a sh: fetch, a publish: article, and a summary (bundles)
+    daily-briefing-llm.yaml   # same shape via first-party llm: steps — no bundles to copy
     review-queue.yaml         # cross-repo PR triage; recommends one PR Review per matching PR
     pr-review.yaml            # takes repo + pr_number inputs, fetches the PR, publishes a review
     chart-gallery.yaml        # publishes an article showcasing every embeddable chart type
   prompts/
-    daily-briefing.tpl        # prompt template for the briefing
+    daily-briefing.tpl        # prompt template for the bundle-backed briefing
+    daily-briefing-llm.tpl    # same briefing prompt for llm: publish (uses {{KIRI_RUN_CONTEXT}})
     pr-review.tpl             # prompt template for the PR review
 ```
 
 Each bundle's `README.md` documents its env-var contract — the
 load-bearing reference for authoring your own bundles.
+
+## First-party `llm:` steps vs bundles
+
+For **completion-shaped** steps — publish a markdown article, summarise a
+run, one-shot text generation — first-party `llm:` steps are the
+streamlined path. Declare providers in `llm-providers.yaml` at the
+workspace root, then reference `provider:model` ids directly in workflow
+YAML. No `scripts/` bundle to copy; prompts use the same `{{VAR}}`
+templating as the `claude-code` bundles.
+
+`daily-briefing-llm.yaml` mirrors `daily-briefing.yaml`: a `sh:` fetch
+step, an `llm:` publish entry with `prompt_file`, and a zero-config
+`summarize: { llm: { model } }` that uses kiri's baked-in summariser
+prompt. Requires `ANTHROPIC_API_KEY` (or edit `llm-providers.yaml` to
+point at a local `openai-compatible` server).
+
+**Agentic** workflows — tool use, multi-turn sessions, repo edits —
+still belong on the `claude-code` bundle (or your own fork of it).
+Migrating personal workspace workflows from bundles to `llm:` is a
+follow-up outside this repo.
 
 ## Using a bundle
 

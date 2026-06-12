@@ -32,6 +32,37 @@ Workflows surface proposed follow-up workflow invocations attached to the produc
 - Feed entry surfaces a small count when a run has recommendations ("3 recommendations").
 - A recommendation whose `workflow` is no longer in the registry renders the trigger button disabled with a "workflow not found" tooltip.
 
+## M9 — Article view redesign
+
+Published-article reading view (`/runs/:id/published/:slug`) reads as a real article — editorial typography, marginalia table of contents, and foundation tokens (newsprint grain overlay, extended colour tokens) that later redesign milestones build on.
+
+- Token additions: `--canvas-2`, `--paper-2`, `--ink-faint`, `--accent-deep`.
+- Article H1 from body markdown in italic Fraunces; section H2 ordinal eyebrows (`§ 01`).
+- Byline rule: workflow link, time, duration, git SHA, secondary actions (open run, copy markdown).
+- Marginalia TOC in the right rail with scroll-spy; marginalia actions (open run, copy markdown, re-run workflow).
+- Shared Markdown component polish for lists, links, and inline code (applies everywhere markdown renders).
+
+## M10 — Workflow page redesign
+
+Workflow detail view (`/workflows/:name`) opens on "what did this last do" instead of a YAML dump. Recent runs and a duration sparkline lead; the definition becomes one tab among several.
+
+- Hero: workflow name, optional `description:` deck, action buttons (run with inputs, view definition).
+- Optional top-level `description:` and `group:` fields on the workflow YAML schema.
+- "Last 14 runs" stats panel with duration sparkline (warm bars flag slower-than-median runs).
+- Tabs: Recent runs, Inputs, Steps, Summariser, YAML definition.
+- Recent runs as full-width feed-style rows; `GET /api/runs?workflow=<name>` filter.
+- Right rail: declared inputs, publish entries, latest-run summary card.
+
+## M11 — First-party LLM steps
+
+First-party LLM calls in workflows — completion-shaped steps without copying a bundle.
+
+- `llm-providers.yaml` at the workspace root: `anthropic`, `openai`, `openai-compatible` providers; API keys via `{ env: }` refs only.
+- `llm:` step variant alongside `use:` / `sh:` on `steps:`, `publish:`, and `summarize:`.
+- Kiri-owned `{{VAR}}` prompt templating (compatible with existing bundle prompts); `{{KIRI_RUN_CONTEXT}}` inlined on publish/summarize llm steps with per-stream truncation.
+- Baked-in zero-config summariser default when `summarize: { llm: { model } }` omits a prompt.
+- Token usage on `traces.usage` at run time. Agentic bundle uses (e.g. `dev-patch`) stay on `claude-code` until the agents pillar.
+
 ## Out of scope (v1)
 
 Capability:
