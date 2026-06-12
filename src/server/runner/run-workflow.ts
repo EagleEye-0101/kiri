@@ -6,15 +6,20 @@ import type { KiriDb } from "../db/index.ts";
 import { articles, runSteps, runs } from "../db/schema.ts";
 import type { EventBus } from "../events/index.ts";
 import { resolveGitHead } from "../git/head.ts";
+import { buildRunContext } from "../llm/build-run-context.ts";
+import type { LlmRegistry } from "../llm/index.ts";
 import {
   type PublishEntry,
   type WorkflowDefinition,
   type WorkflowStep,
+  isLlmPublish,
+  isLlmStep,
   isUsePublish,
   isUseStep,
 } from "../workflows/index.ts";
 import type { CancelRegistry } from "./cancel-registry.ts";
 import { ingestStepRecommendations } from "./recommendations.ts";
+import { runLlmStep } from "./run-llm-step.ts";
 import { type StepEnvelope, runStep } from "./run-step.ts";
 
 export interface RunWorkflowArgs {
@@ -28,6 +33,8 @@ export interface RunWorkflowArgs {
   runId?: string;
   /** Explicit input values supplied at invocation. Used together with each declared input's `default` to produce the resolved snapshot persisted on `runs.inputs` and consulted when resolving `{ input: <name> }` env references. Ignored when the workflow declares no `inputs:` block. */
   inputs?: Record<string, string>;
+  /** Provider registry for `llm:` steps. Required when the workflow contains any llm step. */
+  llmRegistry?: LlmRegistry;
 }
 
 export interface RunWorkflowResult {
@@ -61,7 +68,11 @@ interface DefinitionSnapshot {
  * run-context JSON file the summariser reads. Carries each step's
  * outcome so the summariser has full context without a DB round-trip.
  */
-type ExecutedStep = ({ kind: "use"; use: string } | { kind: "sh"; sh: string }) & {
+type ExecutedStep = (
+  | { kind: "use"; use: string }
+  | { kind: "sh"; sh: string }
+  | { kind: "llm"; model: string }
+) & {
   index: number;
   status: "ok" | "failed" | "cancelled";
   durationMs: number;
@@ -95,8 +106,24 @@ const resolveInputs = (
   return resolved;
 };
 
-const publishAsStep = (entry: PublishEntry): WorkflowStep =>
-  isUsePublish(entry) ? { use: entry.use, env: entry.env } : { sh: entry.sh, env: entry.env };
+const publishAsStep = (entry: PublishEntry): WorkflowStep => {
+  if (isUsePublish(entry)) return { use: entry.use, env: entry.env };
+  if (isLlmPublish(entry)) {
+    return {
+      llm: entry.llm,
+      env: entry.env,
+      name: entry.name,
+      description: entry.description,
+    };
+  }
+  return { sh: entry.sh, env: entry.env };
+};
+
+const stepKind = (step: WorkflowStep): "use" | "sh" | "llm" => {
+  if (isUseStep(step)) return "use";
+  if (isLlmStep(step)) return "llm";
+  return "sh";
+};
 
 const buildEnv = (
   step: WorkflowStep,
@@ -228,6 +255,7 @@ export function runWorkflow(
     flag?: "publish" | "summary";
     input: string;
     envExtras?: Record<string, string>;
+    runContextJson?: string;
   }): Promise<{
     envelope: StepEnvelope;
     cancelled: boolean;
@@ -240,7 +268,7 @@ export function runWorkflow(
         id: stepId,
         runId,
         index: opts.index,
-        kind: isUseStep(opts.step) ? "use" : "sh",
+        kind: stepKind(opts.step),
         status: "running",
         startedAt: new Date(),
         isPublish: opts.flag === "publish" ? true : undefined,
@@ -253,14 +281,32 @@ export function runWorkflow(
     const env = buildEnv(opts.step, runId, opts.index, args.cwd, resolvedInputs);
     if (opts.envExtras) Object.assign(env, opts.envExtras);
 
-    const envelope = await runStep({
-      step: opts.step,
-      cwd: args.cwd,
-      scratchDir,
-      input: opts.input,
-      env,
-      onSpawn: (proc) => args.cancelRegistry?.setChild(runId, proc),
-    });
+    let envelope: StepEnvelope;
+    if (isLlmStep(opts.step)) {
+      if (!args.llmRegistry) {
+        throw new Error("llmRegistry is required to run llm steps");
+      }
+      envelope = await runLlmStep({
+        step: opts.step,
+        cwd: args.cwd,
+        input: opts.input,
+        env,
+        llmRegistry: args.llmRegistry,
+        isSummarize: opts.flag === "summary",
+        runContextJson: opts.runContextJson,
+        onAbortController: (controller) =>
+          args.cancelRegistry?.setChild(runId, { kill: () => controller.abort() }),
+      });
+    } else {
+      envelope = await runStep({
+        step: opts.step,
+        cwd: args.cwd,
+        scratchDir,
+        input: opts.input,
+        env,
+        onSpawn: (proc) => args.cancelRegistry?.setChild(runId, proc),
+      });
+    }
 
     // A `failed` envelope produced after cancel was requested is the child
     // reacting to our SIGTERM/SIGKILL — surface it as `cancelled` on the
@@ -308,26 +354,30 @@ export function runWorkflow(
         if (args.cancelRegistry?.isCancelled(runId)) break;
 
         const step = definition.steps[i];
-        const recommendationsFile = join(scratchDir, `recommendations-${i}.jsonl`);
+        const envExtras = isLlmStep(step)
+          ? undefined
+          : { KIRI_RECOMMENDATIONS_FILE: join(scratchDir, `recommendations-${i}.jsonl`) };
         const { envelope, cancelled, stepStatus, stepError } = await executePhase({
           step,
           index: i,
           input,
-          envExtras: { KIRI_RECOMMENDATIONS_FILE: recommendationsFile },
+          envExtras,
         });
 
-        if (stepStatus === "ok") {
+        if (stepStatus === "ok" && envExtras?.KIRI_RECOMMENDATIONS_FILE) {
           recommendationIndex = ingestStepRecommendations(
             db,
             runId,
-            recommendationsFile,
+            envExtras.KIRI_RECOMMENDATIONS_FILE,
             recommendationIndex,
           );
         }
 
-        const stepIdent: { kind: "use"; use: string } | { kind: "sh"; sh: string } = isUseStep(step)
+        const stepIdent = isUseStep(step)
           ? { kind: "use", use: step.use }
-          : { kind: "sh", sh: step.sh };
+          : isLlmStep(step)
+            ? { kind: "llm", model: step.llm.model }
+            : { kind: "sh", sh: step.sh };
         executed.push({
           ...stepIdent,
           index: i,
@@ -377,29 +427,29 @@ export function runWorkflow(
         const publishStep = publishAsStep(entry);
         const publishIndex = definition.steps.length + pi;
 
-        const contextFile = join(scratchDir, `publish-context-${pi}.json`);
-        writeFileSync(
-          contextFile,
-          JSON.stringify(
-            {
-              workflow: definition.name,
-              status,
-              startedAt: startedAt.toISOString(),
-              durationMs: Date.now() - startedAt.getTime(),
-              steps: executed,
-              articles: publishedArticles,
-            },
-            null,
-            2,
-          ),
-        );
+        const contextEnvelope = {
+          workflow: definition.name,
+          status,
+          startedAt: startedAt.toISOString(),
+          durationMs: Date.now() - startedAt.getTime(),
+          steps: executed,
+          articles: publishedArticles,
+        };
+
+        const publishPhaseArgs = isLlmPublish(entry)
+          ? { runContextJson: buildRunContext(contextEnvelope) }
+          : (() => {
+              const contextFile = join(scratchDir, `publish-context-${pi}.json`);
+              writeFileSync(contextFile, JSON.stringify(contextEnvelope, null, 2));
+              return { envExtras: { KIRI_RUN_CONTEXT_FILE: contextFile } };
+            })();
 
         const { envelope, cancelled } = await executePhase({
           step: publishStep,
           index: publishIndex,
           flag: "publish",
           input: "",
-          envExtras: { KIRI_RUN_CONTEXT_FILE: contextFile },
+          ...publishPhaseArgs,
         });
 
         if (envelope.status === "ok" && !cancelled) {
@@ -440,29 +490,29 @@ export function runWorkflow(
       if (definition.summarize && status === "ok") {
         const summarizeStep = definition.summarize;
         const summaryIndex = definition.steps.length + publishes.length;
-        const contextFile = join(scratchDir, "run-context.json");
-        writeFileSync(
-          contextFile,
-          JSON.stringify(
-            {
-              workflow: definition.name,
-              status,
-              startedAt: startedAt.toISOString(),
-              durationMs: Date.now() - startedAt.getTime(),
-              steps: executed,
-              articles: publishedArticles,
-            },
-            null,
-            2,
-          ),
-        );
+        const summaryContext = {
+          workflow: definition.name,
+          status,
+          startedAt: startedAt.toISOString(),
+          durationMs: Date.now() - startedAt.getTime(),
+          steps: executed,
+          articles: publishedArticles,
+        };
+
+        const summaryPhaseArgs = isLlmStep(summarizeStep)
+          ? { runContextJson: buildRunContext(summaryContext) }
+          : (() => {
+              const contextFile = join(scratchDir, "run-context.json");
+              writeFileSync(contextFile, JSON.stringify(summaryContext, null, 2));
+              return { envExtras: { KIRI_RUN_CONTEXT_FILE: contextFile } };
+            })();
 
         const { envelope, cancelled } = await executePhase({
           step: summarizeStep,
           index: summaryIndex,
           flag: "summary",
           input: "",
-          envExtras: { KIRI_RUN_CONTEXT_FILE: contextFile },
+          ...summaryPhaseArgs,
         });
 
         if (envelope.status === "ok" && !cancelled) {

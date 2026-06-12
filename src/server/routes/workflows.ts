@@ -5,12 +5,14 @@ import type { KiriDb } from "../db/index.ts";
 import type { EventBus } from "../events/index.ts";
 import type { CancelRegistry } from "../runner/cancel-registry.ts";
 import { runWorkflow } from "../runner/index.ts";
+import type { LlmRegistry } from "../llm/index.ts";
 import { type Registry, type WorkflowDefinition, buildInputSchema } from "../workflows/index.ts";
 import { onZodFail, optionalInvokeBody, workflowNameParamSchema, zodErrorBody } from "./shared.ts";
 
 export interface WorkflowsRoutesDeps {
   db: KiriDb;
   registry: Registry;
+  llmRegistry: LlmRegistry;
   cwd: string;
   bus?: EventBus;
   cancelRegistry?: CancelRegistry;
@@ -46,7 +48,7 @@ const summarizeWorkflow = (def: WorkflowDefinition) => ({
  * by `createApp`.
  */
 export function workflowsRoutes(deps: WorkflowsRoutesDeps): Hono {
-  const { db, registry, cwd, bus, cancelRegistry } = deps;
+  const { db, registry, llmRegistry, cwd, bus, cancelRegistry } = deps;
   const app = new Hono();
 
   app.get("/", (c) => c.json(registry.listWorkflows().map(summarizeWorkflow)));
@@ -68,6 +70,7 @@ export function workflowsRoutes(deps: WorkflowsRoutesDeps): Hono {
         cwd,
         bus,
         cancelRegistry,
+        llmRegistry,
         inputs,
       });
       // Background execution: log unhandled rejections so they don't trip the

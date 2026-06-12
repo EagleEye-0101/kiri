@@ -231,9 +231,13 @@ Three tiers, in order:
 2. Validate against Zod schema. On failure, one-shot retry with the validation error fed back into the prompt.
 3. *Optional* dedicated cleanup model — constrained to format-level repairs only. Stripping backticks: safe. Reshaping prose into fields: not safe.
 
+### First-party `llm:` steps
+
+`llm:` steps call providers declared in `llm-providers.yaml` through the AI SDK. Completion text lands on the standard step envelope (`output`, `traces.stdout`); optional `traces.usage` carries token counts from the provider response. Script steps still use `KIRI_RECOMMENDATIONS_FILE`; llm steps do not — a completion cannot read or write scratch files. Publish and summarize llm steps receive `{{KIRI_RUN_CONTEXT}}` inlined from a truncated run-context JSON blob rather than `KIRI_RUN_CONTEXT_FILE`.
+
 ### Cost tracking
 
-Deferred. The earlier design carried a generic `meta` channel (`KIRI_META_FILE`) for steps to emit `{ cost_usd, tokens_in, tokens_out, model }`, with the UI promoting conventional keys to feed headers. The channel was never read back and the cost numbers never landed, so the wiring was retired to keep the runtime contract honest. Picking this up later means re-introducing both the file channel (or a different transport) and the UI promotion; ccusage's transcript-parsing approach remains the reference for the underlying numbers.
+Token usage from first-party `llm:` steps is captured on `traces.usage` at run time. Dollar-cost UI remains deferred. The earlier generic `meta` channel (`KIRI_META_FILE`) was retired before it was read back; first-party usage on step traces supersedes that rationale for completion-shaped steps.
 
 ### Permissions philosophy
 

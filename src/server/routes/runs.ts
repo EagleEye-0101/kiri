@@ -11,6 +11,7 @@ import { articles, recommendations, runSteps, runs } from "../db/schema.ts";
 import type { EventBus } from "../events/index.ts";
 import type { CancelRegistry } from "../runner/cancel-registry.ts";
 import { runWorkflow } from "../runner/index.ts";
+import type { LlmRegistry } from "../llm/index.ts";
 import { type Registry, buildInputSchema } from "../workflows/index.ts";
 import {
   onZodFail,
@@ -23,6 +24,7 @@ import {
 export interface RunsRoutesDeps {
   db: KiriDb;
   registry: Registry;
+  llmRegistry: LlmRegistry;
   cwd: string;
   bus?: EventBus;
   /**
@@ -53,7 +55,7 @@ const recommendationActionParamSchema = z.object({
  * fetch. Mounted at `/api/runs` by `createApp`.
  */
 export function runsRoutes(deps: RunsRoutesDeps): Hono {
-  const { db, registry, cwd, bus, cancelRegistry } = deps;
+  const { db, registry, llmRegistry, cwd, bus, cancelRegistry } = deps;
   const app = new Hono();
 
   app.get("/", zValidator("query", runListQuerySchema, onZodFail("invalid query")), (c) => {
@@ -329,6 +331,7 @@ export function runsRoutes(deps: RunsRoutesDeps): Hono {
         cwd,
         bus,
         cancelRegistry,
+        llmRegistry,
         runId: id,
         inputs,
       });
@@ -372,6 +375,7 @@ export function runsRoutes(deps: RunsRoutesDeps): Hono {
         cwd,
         bus,
         cancelRegistry,
+        llmRegistry,
         inputs,
       });
       done.catch((cause) => {

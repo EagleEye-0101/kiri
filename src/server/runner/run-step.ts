@@ -1,3 +1,4 @@
+import type { LlmTextUsage } from "../llm/clients.ts";
 import { type WorkflowStep, bundleRunPath, isUseStep } from "../workflows/index.ts";
 
 /**
@@ -9,7 +10,7 @@ export interface StepEnvelope {
   status: "ok" | "failed";
   output: string;
   error?: { message: string; stack?: string };
-  traces: { stdout: string; stderr: string; durationMs: number };
+  traces: { stdout: string; stderr: string; durationMs: number; usage?: LlmTextUsage };
 }
 
 export interface RunStepArgs {

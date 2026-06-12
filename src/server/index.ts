@@ -149,8 +149,9 @@ export function createApp(deps: AppDeps): Hono {
   app.notFound((c) => c.json({ error: "not found" }, 404));
 
   app.route("/api", systemRoutes({ version }));
-  app.route("/api/workflows", workflowsRoutes({ db, registry, cwd, bus, cancelRegistry }));
-  app.route("/api/runs", runsRoutes({ db, registry, cwd, bus, cancelRegistry }));
+  const llmRegistry = deps.llmRegistry ?? createLlmRegistry();
+  app.route("/api/workflows", workflowsRoutes({ db, registry, llmRegistry, cwd, bus, cancelRegistry }));
+  app.route("/api/runs", runsRoutes({ db, registry, llmRegistry, cwd, bus, cancelRegistry }));
   app.route("/api/articles", articlesRoutes({ db }));
 
   if (bus) {
