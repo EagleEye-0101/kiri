@@ -63,7 +63,7 @@ export function SchemaSpec({
     <div className="divide-y divide-rule">
       {steps.map((step, index) => (
         <SchemaRow
-          key={`step-${index}-${"use" in step ? step.use : step.sh}`}
+          key={`step-${index}-${"llm" in step ? step.llm.model : "use" in step ? step.use : step.sh}`}
           marker={`Step ${String(index + 1).padStart(2, "0")}`}
           entry={step}
         />

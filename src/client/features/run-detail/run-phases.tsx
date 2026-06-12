@@ -1,12 +1,12 @@
 import type { ReactNode } from "react";
 import { resolvePublishName } from "../../../shared/publish-name.ts";
-import type { RunDetailRun, RunStepRow } from "../../api.ts";
+import type { LlmConfigSummary, RunDetailRun, RunStepRow, WorkflowStepSummary } from "../../api.ts";
 import { CodeBlock } from "../../design-system/content/code.tsx";
 import { Disclosure } from "../../design-system/content/disclosure.tsx";
 import { Eyebrow } from "../../design-system/content/eyebrow.tsx";
 import { Status, type StatusKind } from "../../design-system/feedback/status.tsx";
 import { formatDuration } from "../../formatters/format-time.ts";
-import { stepTitle } from "../workflow-details/entry-config.tsx";
+import { llmPromptSource, stepTitle } from "../workflow-details/entry-config.tsx";
 import { LiveDuration } from "./live-duration.tsx";
 
 interface PhaseItem {
@@ -16,6 +16,8 @@ interface PhaseItem {
   status: StatusKind;
   /** The persisted step row, once the runner has reached this entry. */
   row: RunStepRow | undefined;
+  /** Declared step shape from the run snapshot, for llm prompt source. */
+  stepDef?: WorkflowStepSummary | { llm: LlmConfigSummary };
 }
 
 /**
@@ -37,6 +39,7 @@ const buildPhases = (run: RunDetailRun, steps: RunStepRow[]) => {
       title: stepTitle(step),
       status: row?.status ?? "pending",
       row,
+      stepDef: step,
     };
   });
 
@@ -49,6 +52,7 @@ const buildPhases = (run: RunDetailRun, steps: RunStepRow[]) => {
       title: resolvePublishName(entry.slug, entry.name),
       status: row?.status ?? "pending",
       row,
+      stepDef: "llm" in entry ? { llm: entry.llm } : undefined,
     };
   });
 
@@ -61,6 +65,7 @@ const buildPhases = (run: RunDetailRun, steps: RunStepRow[]) => {
       title: stepTitle(snap.summarize),
       status: row?.status ?? "pending",
       row,
+      stepDef: snap.summarize,
     };
   }
 
@@ -135,7 +140,7 @@ function PhaseRow({ item, now }: { item: PhaseItem; now?: Date }) {
   }
   return (
     <Disclosure summary={summary}>
-      <StepTrace row={item.row} />
+      <StepTrace row={item.row} stepDef={item.stepDef} />
     </Disclosure>
   );
 }
@@ -146,9 +151,25 @@ function StepDuration({ row, now }: { row: RunStepRow | undefined; now?: Date })
   return <>{formatDuration(row.startedAt, row.finishedAt)}</>;
 }
 
-function StepTrace({ row }: { row: RunStepRow }) {
+function StepTrace({
+  row,
+  stepDef,
+}: {
+  row: RunStepRow;
+  stepDef?: WorkflowStepSummary | { llm: LlmConfigSummary };
+}) {
+  const llm =
+    row.kind === "llm" && stepDef && "llm" in stepDef ? stepDef.llm : undefined;
+  const usage = row.traces?.usage;
   return (
     <div className="space-y-4">
+      {llm ? (
+        <div className="space-y-4">
+          <LabelledTraceMeta label="model" value={llm.model} />
+          <LabelledTraceMeta label="prompt" value={llmPromptSource(llm)} />
+        </div>
+      ) : null}
+      {usage ? <UsageTrace usage={usage} /> : null}
       <TracePart label="stdout" body={row.traces?.stdout ?? ""} />
       <TracePart label="stderr" body={row.traces?.stderr ?? ""} />
       {row.error ? (
@@ -166,6 +187,29 @@ function StepTrace({ row }: { row: RunStepRow }) {
       ) : null}
     </div>
   );
+}
+
+function LabelledTraceMeta({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <Eyebrow tone="muted">{label}</Eyebrow>
+      <p className="mt-1.5 font-mono text-xs break-words text-ink">{value}</p>
+    </div>
+  );
+}
+
+function UsageTrace({
+  usage,
+}: {
+  usage: NonNullable<NonNullable<RunStepRow["traces"]>["usage"]>;
+}) {
+  const parts: string[] = [];
+  if (usage.inputTokens !== undefined) parts.push(`in ${usage.inputTokens}`);
+  if (usage.outputTokens !== undefined) parts.push(`out ${usage.outputTokens}`);
+  if (usage.cachedInputTokens !== undefined) parts.push(`cached ${usage.cachedInputTokens}`);
+  if (usage.totalTokens !== undefined) parts.push(`total ${usage.totalTokens}`);
+  if (parts.length === 0) return null;
+  return <LabelledTraceMeta label="usage" value={parts.join(" · ")} />;
 }
 
 function TracePart({ label, body }: { label: string; body: string }): ReactNode {

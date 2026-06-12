@@ -12,9 +12,16 @@ export type EnvValue = string | { input: string };
  * short label used as the step's title in the Schema tab and run timeline;
  * absent steps fall back to the bundle reference or the script's first line.
  */
+export type LlmConfigSummary = {
+  model: string;
+  prompt?: string;
+  prompt_file?: string;
+};
+
 export type WorkflowStepSummary =
   | { use: string; name?: string; description?: string; env?: Record<string, EnvValue> }
-  | { sh: string; name?: string; description?: string; env?: Record<string, EnvValue> };
+  | { sh: string; name?: string; description?: string; env?: Record<string, EnvValue> }
+  | { llm: LlmConfigSummary; name?: string; description?: string; env?: Record<string, EnvValue> };
 
 /**
  * One `publish:` entry on a workflow summary. `slug` is the URL/identifier;
@@ -34,6 +41,13 @@ export type WorkflowPublishSummary =
       name: string;
       description?: string;
       sh: string;
+      env?: Record<string, EnvValue>;
+    }
+  | {
+      slug: string;
+      name: string;
+      description?: string;
+      llm: LlmConfigSummary;
       env?: Record<string, EnvValue>;
     };
 
@@ -190,7 +204,17 @@ export interface RunStepRow {
   finishedAt: string | null;
   output: unknown;
   error: { message: string; stack?: string } | null;
-  traces: { stdout: string; stderr: string; durationMs: number } | null;
+  traces: {
+    stdout: string;
+    stderr: string;
+    durationMs: number;
+    usage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      cachedInputTokens?: number;
+      totalTokens?: number;
+    };
+  } | null;
   isSummary: boolean;
   isPublish: boolean;
 }

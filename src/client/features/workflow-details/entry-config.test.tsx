@@ -6,6 +6,9 @@ describe("step helpers", () => {
   it("derives the kind from the entry shape", () => {
     expect(stepKind({ use: "bundle" })).toBe("use");
     expect(stepKind({ sh: "echo" })).toBe("sh");
+    expect(stepKind({ llm: { model: "anthropic:claude-haiku-4-5", prompt: "hi" } })).toBe(
+      "llm",
+    );
   });
 
   it("titles a use entry with its reference and an sh entry with its first non-empty line", () => {
@@ -43,5 +46,15 @@ describe("<EntryConfig>", () => {
   it("shows the bundle reference for a use entry", () => {
     render(<EntryConfig entry={{ use: "notify-bundle" }} />);
     expect(screen.getByText("notify-bundle")).toBeDefined();
+  });
+
+  it("shows model and prompt source for an llm entry", () => {
+    render(
+      <EntryConfig
+        entry={{ llm: { model: "openai:gpt-4o-mini", prompt_file: "prompts/out.tpl" } }}
+      />,
+    );
+    expect(screen.getByText("openai:gpt-4o-mini")).toBeDefined();
+    expect(screen.getByText("prompts/out.tpl")).toBeDefined();
   });
 });

@@ -118,6 +118,33 @@ describe("<RunPhases>", () => {
     expect(screen.getByText("—")).toBeDefined();
   });
 
+  it("expands an llm step to show model, prompt source, and usage", async () => {
+    const user = userEvent.setup();
+    const run = makeRun({
+      name: "wf",
+      steps: [{ llm: { model: "anthropic:claude-haiku-4-5", prompt: "Say hi" } }],
+    });
+    const steps = [
+      makeStep({
+        index: 0,
+        kind: "llm",
+        traces: {
+          stdout: "hello",
+          stderr: "",
+          durationMs: 500,
+          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        },
+      }),
+    ];
+
+    render(<RunPhases run={run} steps={steps} now={NOW} />);
+    await user.click(screen.getByRole("button", { name: /anthropic:claude-haiku-4-5/i }));
+
+    expect(screen.getByText("Say hi")).toBeDefined();
+    expect(screen.getByText(/in 10/)).toBeDefined();
+    expect(screen.getByText("hello")).toBeDefined();
+  });
+
   it("surfaces a failed step's error message, with the stack when present", async () => {
     const user = userEvent.setup();
     const run = makeRun({ name: "wf", steps: [{ use: "build" }, { use: "test" }] });
