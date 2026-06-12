@@ -18,3 +18,12 @@ export {
   generateLlmText,
   resolveModel,
 } from "./clients.ts";
+export {
+  RUN_CONTEXT_STREAM_CAP_BYTES,
+  type RunContextArticle,
+  type RunContextEnvelope,
+  type RunContextStep,
+  buildRunContext,
+  truncateRunContextStream,
+} from "./build-run-context.ts";
+export { renderPrompt } from "./render-prompt.ts";
