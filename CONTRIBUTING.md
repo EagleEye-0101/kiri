@@ -82,12 +82,12 @@ bin/kiri.ts            entry point — boots Hono
 src/server/            Hono app + tests
 src/client/            Vite + React SPA (kebab-case filenames)
 shell/                 static shell deployed to https://local.kiri.build
-docs/                  design notes & milestones — read these before substantive work
+docs/                  design notes — read before substantive work
 examples/              reference kiri workspace — example bundles + the dogfood workflow
 .kiri/                 repo-scoped runtime state (gitignored, created on launch)
 ```
 
-See `docs/design-notes.md` for architecture and `docs/milestones.md` for the build sequence.
+See `docs/design-notes.md` for architecture and the phased build sequence.
 
 ## Deploying the shell at `https://local.kiri.build`
 
