@@ -73,6 +73,33 @@ This single primitive — the script bundle — supports every runtime kiri will
 
 Rationale for YAML over TS: workflow files live in arbitrary user repos, but kiri ships as a single Bun-compiled binary. Resolving a TS `import { defineWorkflow } from "kiri"` from those repos would require both a Bun plugin baked into the binary to intercept the import *and* generated `.d.ts` files dropped into each repo for IDE support — both maintenance costs that compound forever. YAML is pure data, validated at load time, and a JSON schema can be published alongside the binary for editor LSP integration with no per-repo footprint.
 
+### LLM provider configuration
+
+`llm-providers.yaml` at the workspace root declares the LLM endpoints that `llm:` workflow steps reference. It is kiri's first workspace-level config file alongside the per-directory workflow YAML.
+
+```yaml
+providers:
+  anthropic:                              # type defaults to the key for built-in names
+    api_key:
+      env: MY_ANTHROPIC_KEY               # { env: NAME } only — literal strings are rejected
+  openai:
+    api_key:
+      env: OPENAI_API_KEY
+  local:
+    type: openai-compatible
+    base_url: http://127.0.0.1:1234/v1    # required for openai-compatible
+```
+
+Each entry's `type` is one of `anthropic`, `openai`, or `openai-compatible`. When the map key is a built-in name, `type` may be omitted and defaults to the key; otherwise `type` is required. `api_key` accepts only the `{ env: <NAME> }` structured-ref form — a literal string is a schema error so secrets never land in git-tracked YAML. When `api_key` is omitted, `anthropic` and `openai` fall back to the conventional `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` env vars; `openai-compatible` needs no key.
+
+Load-time validation mirrors the missing-bundle posture for declared env refs: if a provider names `{ env: FOO }`, `FOO` must be present in the kiri process environment at load time or startup fails with a clear error naming the offending key. Resolved API key values are never persisted, snapshotted, or echoed in errors.
+
+A missing `llm-providers.yaml` is first-class — an empty provider registry, not an error. There is no dev-mode file watcher for this file; restart kiri to reload provider config after edits.
+
+Bun auto-loads `.env` from the workspace root, so provider env refs typically resolve from there without exporting vars into the shell.
+
+Kiri publishes `.kiri/llm-providers.schema.json` at startup (alongside the workflow schema) for IDE/LSP validation.
+
 ### Standard step envelope
 
 Every step returns the same shape. Designed in early — painful to retrofit.

@@ -5,6 +5,7 @@ import { HTTPException } from "hono/http-exception";
 import type { KiriDb } from "./db/index.ts";
 import { EMBEDDED_FILES } from "./embedded-assets.ts";
 import { type EventBus, mountEventsRoute, mountRecommendationReflector } from "./events/index.ts";
+import { type LlmRegistry, createLlmRegistry } from "./llm/index.ts";
 import { articlesRoutes } from "./routes/articles.ts";
 import { runsRoutes } from "./routes/runs.ts";
 import { mountStaticRoutes } from "./routes/static.ts";
@@ -32,6 +33,8 @@ import type { Registry } from "./workflows/index.ts";
 export interface AppDeps {
   db: KiriDb;
   registry: Registry;
+  /** LLM provider registry. Defaults to empty when omitted (tests). */
+  llmRegistry?: LlmRegistry;
   cwd: string;
   staticRoot?: string;
   bus?: EventBus;

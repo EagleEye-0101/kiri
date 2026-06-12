@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { bootstrap } from "../bootstrap.ts";
 import type { KiriDb } from "../db/index.ts";
 import { type EventBus, createEventBus } from "../events/index.ts";
+import { type LlmRegistry, createLlmRegistry } from "../llm/index.ts";
 import { type Registry, createRegistry } from "../workflows/index.ts";
 
 /** Headers the CSRF gate requires on every state-changing request. */
@@ -18,6 +19,7 @@ export interface TestEnv {
   cwd: string;
   db: KiriDb;
   registry: Registry;
+  llmRegistry: LlmRegistry;
   dispose(): void;
 }
 
@@ -25,10 +27,12 @@ export function createTestEnv(): TestEnv {
   const cwd = mkdtempSync(join(tmpdir(), "kiri-app-"));
   const db = bootstrap(cwd);
   const registry = createRegistry();
+  const llmRegistry = createLlmRegistry();
   return {
     cwd,
     db,
     registry,
+    llmRegistry,
     dispose() {
       db.$client.close();
       rmSync(cwd, { recursive: true, force: true });

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { llmProvidersJsonSchema } from "./llm/index.ts";
 import { workflowJsonSchema } from "./workflows/index.ts";
 
 /** Contents of the scaffolded repo-root `README.md`. */
@@ -218,6 +219,7 @@ steps:
 
 /** Relative paths reported by `initRepo`. */
 const SCHEMA_REL_PATH = ".kiri/workflow.schema.json";
+const LLM_PROVIDERS_SCHEMA_REL_PATH = ".kiri/llm-providers.schema.json";
 const README_REL_PATH = "README.md";
 const HELLO_WORLD_WORKFLOW_REL_PATH = "workflows/hello-world.yaml";
 const GITIGNORE_REL_PATH = ".gitignore";
@@ -245,6 +247,19 @@ export function writeSchemaFile(cwd: string): string {
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "workflow.schema.json");
   writeFileSync(path, `${JSON.stringify(workflowJsonSchema(), null, 2)}\n`);
+  return path;
+}
+
+/**
+ * (Re)write `.kiri/llm-providers.schema.json` from the live Zod schema.
+ * Called by both `initRepo` and on every kiri startup so the schema file
+ * stays in sync after a binary upgrade.
+ */
+export function writeLlmProvidersSchemaFile(cwd: string): string {
+  const dir = join(cwd, ".kiri");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "llm-providers.schema.json");
+  writeFileSync(path, `${JSON.stringify(llmProvidersJsonSchema(), null, 2)}\n`);
   return path;
 }
 
@@ -305,6 +320,7 @@ export function initRepo(cwd: string): InitResult {
   );
 
   writeSchemaFile(cwd);
+  writeLlmProvidersSchemaFile(cwd);
   const gitignoreUpdated = ensureKiriIgnored(cwd);
 
   return {

@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bootstrap } from "./bootstrap.ts";
+import { llmProvidersJsonSchema } from "./llm/index.ts";
 import { workflowJsonSchema } from "./workflows/index.ts";
 
 describe("bootstrap", () => {
@@ -24,6 +25,9 @@ describe("bootstrap", () => {
     expect(JSON.parse(readFileSync(join(dir, ".kiri", "workflow.schema.json"), "utf8"))).toEqual(
       workflowJsonSchema(),
     );
+    expect(
+      JSON.parse(readFileSync(join(dir, ".kiri", "llm-providers.schema.json"), "utf8")),
+    ).toEqual(llmProvidersJsonSchema());
     db.$client.close();
   });
 
